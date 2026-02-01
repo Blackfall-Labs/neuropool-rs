@@ -272,11 +272,16 @@ impl NeuronPool {
                 if target >= n { continue; }
 
                 // STDP: pre-synaptic neuron just fired.
-                // If target has a positive trace (recently fired), this is anti-causal (post before pre)
-                if self.neurons.trace[target] > 0 {
+                // Check if target ALSO fired this tick (anti-causal / simultaneous).
+                // We use spike_out (this-tick) not trace (slow-decaying) because the
+                // trace never decays to zero during sustained firing (refractory=2,
+                // fire every 3 ticks, trace_decay=94%/tick → always > 0). Using trace
+                // makes ALL interactions anti-causal during sustained activity, which
+                // causes DA reward to WEAKEN pathways instead of strengthening them.
+                if self.neurons.spike_out[target] {
                     syn.eligibility = syn.eligibility.saturating_add(self.config.stdp_negative);
                 } else {
-                    // Mark this synapse as having recent pre-synaptic activity
+                    // Pre fired, target hasn't fired this tick → causal marking
                     syn.eligibility = syn.eligibility.saturating_add(self.config.stdp_positive);
                 }
 

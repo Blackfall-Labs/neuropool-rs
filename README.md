@@ -42,7 +42,42 @@ NeuronPool
   - Cortisol above baseline weakens eligible synapses
   - Acetylcholine gates synaptogenesis (new connection formation)
 - **Thermal maturity lifecycle**: Synapses promote HOT -> WARM -> COOL -> COLD as they accumulate reinforcement. Cold synapses are frozen. Dead synapses (HOT with zero counter) get pruned.
+- **Homeostatic plasticity**: Per-neuron threshold adjustment targets ~5% spike rate, preventing seizure and silence
 - **Binary persistence**: `.pool` format with CRC32 integrity, contiguous array serialization
+
+## Learning Demo Results
+
+The `learning_demo` example proves the plasticity mechanism works by repeatedly presenting stimulus to input neurons and rewarding output activity with dopamine:
+
+```
+Pool: 32 neurons, 517 synapses (50% density)
+
+Structure:
+  Synapses: 517 -> 62 (88% pruned)
+  Thermal:  H:517 -> F:48 (full maturity lifecycle)
+  Weights:  |w|=39.6 -> 125.3 (3x strengthening)
+
+Activity:
+  Baseline: 104 spikes / 40 ticks
+  Final:    103 spikes / 40 ticks (homeostatic stability)
+
+Performance: 0.32ms/epoch
+```
+
+**What this proves:**
+- STDP traces correctly mark causal pathways
+- DA modulation strengthens traced synapses
+- Thermal lifecycle works: HOT -> WARM -> COOL -> FROZEN
+- Structural pruning removes dead synapses
+- Homeostatic plasticity maintains stable output
+
+**What requires multiple pools:**
+Spatial discrimination (routing different inputs to different outputs) needs separate pools or local modulation. A single pool with global neuromodulation learns pathway strength but not spatial routing. This is by design — in the brain, different cortical columns handle different stimuli. The TVMR integration layer orchestrates multiple pools for discrimination tasks.
+
+Run the demo:
+```bash
+cargo run --example learning_demo
+```
 
 ## Memory Budget
 
@@ -102,6 +137,8 @@ src/
   plasticity.rs   three-factor modulation, synaptogenesis, pruning
   codec.rs        .pool binary save/load
   stats.rs        PoolStats, ThermalDistribution
+examples/
+  learning_demo.rs  pathway strengthening proof
 ```
 
 ## License

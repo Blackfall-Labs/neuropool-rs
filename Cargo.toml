@@ -8,7 +8,7 @@ keywords = ["neuromorphic", "spiking", "plasticity", "neuron", "synapse"]
 categories = ["science", "simulation"]
 
 [dependencies]
-ternary-signal = { path = "../ternary-signal" }
+ternary-signal = "0.1"
 log = "0.4"
 
 [dev-dependencies]
