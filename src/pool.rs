@@ -161,20 +161,34 @@ impl NeuronPool {
         }
     }
 
-    /// Create a pool with random connectivity.
+    /// Create a pool with random connectivity (default seed).
     ///
-    /// `density` is the probability of a connection existing between any two neurons
-    /// (0.0 = no connections, 1.0 = fully connected). Typical: 0.01-0.05.
+    /// Convenience wrapper around `with_random_connectivity_seeded` with a fixed seed.
     pub fn with_random_connectivity(
         name: &str,
         n_neurons: u32,
         density: f32,
         config: PoolConfig,
     ) -> Self {
+        Self::with_random_connectivity_seeded(name, n_neurons, density, config, 0xDEAD_BEEF_CAFE_1337)
+    }
+
+    /// Create a pool with random connectivity using a deterministic seed.
+    ///
+    /// `density` is the probability of a connection existing between any two neurons
+    /// (0.0 = no connections, 1.0 = fully connected). Typical: 0.01-0.05.
+    /// `seed` drives the LCG — same seed + same params = identical pool.
+    pub fn with_random_connectivity_seeded(
+        name: &str,
+        n_neurons: u32,
+        density: f32,
+        config: PoolConfig,
+        seed: u64,
+    ) -> Self {
         let mut pool = Self::new(name, n_neurons, config);
 
         // Simple LCG for deterministic random without pulling in rand crate
-        let mut rng_state: u64 = 0xDEAD_BEEF_CAFE_1337 ^ (n_neurons as u64);
+        let mut rng_state: u64 = seed ^ (n_neurons as u64);
         let lcg_next = |state: &mut u64| -> u32 {
             *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
             (*state >> 33) as u32
@@ -400,6 +414,17 @@ mod tests {
         assert!(pool.synapse_count() > 0, "should have some connections");
         // With 100 neurons and 5% density, expect ~500 synapses (100*99*0.05)
         assert!(pool.synapse_count() > 100, "should have reasonable connectivity");
+    }
+
+    #[test]
+    fn seeded_connectivity_is_deterministic() {
+        let a = NeuronPool::with_random_connectivity_seeded("a", 64, 0.05, PoolConfig::default(), 42);
+        let b = NeuronPool::with_random_connectivity_seeded("b", 64, 0.05, PoolConfig::default(), 42);
+        assert_eq!(a.synapse_count(), b.synapse_count(), "same seed = same synapse count");
+        // Different seed = different topology
+        let c = NeuronPool::with_random_connectivity_seeded("c", 64, 0.05, PoolConfig::default(), 99);
+        // Extremely unlikely to match (but possible in theory)
+        assert_ne!(a.synapse_count(), c.synapse_count(), "different seed should differ");
     }
 
     #[test]
