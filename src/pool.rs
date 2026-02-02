@@ -144,6 +144,47 @@ impl Default for GrowthConfig {
     }
 }
 
+/// Neuron type distribution specification — percentages of excitatory neurons
+/// to seed as each specialized type.
+///
+/// Percentages are applied to excitatory non-boundary neurons only.
+/// Boundary neurons are always Relay (boundary sentinels).
+/// Remainder becomes Computational. Total should not exceed 100.
+#[derive(Clone, Debug)]
+pub struct TypeDistributionSpec {
+    /// Percentage seeded as Gate (chemical-modulated threshold).
+    pub gate_pct: u8,
+    /// Percentage seeded as Oscillator (autonomous depolarization ramp).
+    pub oscillator_pct: u8,
+    /// Percentage seeded as Sensory (reads external field).
+    pub sensory_pct: u8,
+    /// Percentage seeded as Motor (writes output on spike).
+    pub motor_pct: u8,
+    /// Percentage seeded as MemoryReader + MemoryMatcher (split 50/50).
+    pub memory_pct: u8,
+}
+
+impl TypeDistributionSpec {
+    /// All Computational (no specialization). Used as default.
+    pub fn all_computational() -> Self {
+        Self { gate_pct: 0, oscillator_pct: 0, sensory_pct: 0, motor_pct: 0, memory_pct: 0 }
+    }
+
+    /// Total allocated percentage (must not exceed 100).
+    pub fn total_pct(&self) -> u8 {
+        self.gate_pct.saturating_add(self.oscillator_pct)
+            .saturating_add(self.sensory_pct)
+            .saturating_add(self.motor_pct)
+            .saturating_add(self.memory_pct)
+    }
+}
+
+impl Default for TypeDistributionSpec {
+    fn default() -> Self {
+        Self::all_computational()
+    }
+}
+
 /// Pool configuration — all Q8.8 fixed-point where noted.
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
@@ -297,6 +338,10 @@ pub struct NeuronPool {
     /// Neuron count at construction — the genome baseline. Never changes after
     /// creation, even as neurons are grown/pruned. Used to compute growth_ratio.
     pub initial_neuron_count: u32,
+    /// Rolling chemical exposure per neuron — exponential moving average of
+    /// chemical levels seen during growth_cycle. Used by type mutation to detect
+    /// neurons consistently exposed to specific chemicals. 0 = no exposure.
+    pub chem_exposure: Vec<u8>,
 }
 
 impl NeuronPool {
@@ -335,6 +380,7 @@ impl NeuronPool {
             spike_window: vec![false; n_neurons as usize],
             spike_counts: vec![0u32; n_neurons as usize],
             initial_neuron_count: n_neurons,
+            chem_exposure: vec![0u8; n_neurons as usize],
         }
     }
 
@@ -585,6 +631,85 @@ impl NeuronPool {
         }
     }
 
+    /// Seed neuron type distribution across excitatory non-boundary neurons.
+    ///
+    /// Assigns specialized `NeuronType` to a percentage of eligible neurons
+    /// according to the spec. Boundary neurons (Relay sentinels) and inhibitory
+    /// neurons are never reassigned. Uses seeded RNG for determinism.
+    ///
+    /// Returns the number of neurons that were specialized.
+    pub fn seed_type_distribution(&mut self, spec: &TypeDistributionSpec, seed: u64) -> u32 {
+        if spec.total_pct() == 0 {
+            return 0;
+        }
+
+        // Collect eligible neuron indices: excitatory + non-boundary + Computational
+        let eligible: Vec<usize> = (0..self.n_neurons as usize)
+            .filter(|&i| {
+                let f = self.neurons.flags[i];
+                flags::is_excitatory(f)
+                    && flags::neuron_type(f) == NeuronType::Computational
+                    && !(self.dims.h > 1 && self.dims.is_boundary(i as u32))
+            })
+            .collect();
+
+        if eligible.is_empty() {
+            return 0;
+        }
+
+        // Shuffle eligible indices deterministically
+        let mut shuffled = eligible.clone();
+        let mut rng = seed;
+        let lcg = |s: &mut u64| -> u64 {
+            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s >> 33
+        };
+        for i in (1..shuffled.len()).rev() {
+            let j = lcg(&mut rng) as usize % (i + 1);
+            shuffled.swap(i, j);
+        }
+
+        let total = shuffled.len();
+        let mut cursor = 0usize;
+
+        // Helper: assign `pct` percentage of `total` neurons to `ntype`
+        let mut assign = |pct: u8, ntype: NeuronType, count: &mut u32| {
+            let n = (total * pct as usize) / 100;
+            let end = (cursor + n).min(shuffled.len());
+            for &idx in &shuffled[cursor..end] {
+                let old_flags = self.neurons.flags[idx];
+                let inhibitory = flags::is_inhibitory(old_flags);
+                let profile = crate::neuron::NeuronProfile::from_flags(old_flags);
+                self.neurons.flags[idx] = flags::encode_full(inhibitory, profile, ntype);
+                *count += 1;
+            }
+            cursor = end;
+        };
+
+        let mut specialized = 0u32;
+        assign(spec.gate_pct, NeuronType::Gate, &mut specialized);
+        assign(spec.oscillator_pct, NeuronType::Oscillator, &mut specialized);
+        assign(spec.sensory_pct, NeuronType::Sensory, &mut specialized);
+        assign(spec.motor_pct, NeuronType::Motor, &mut specialized);
+
+        // Memory split: half MemoryReader, half MemoryMatcher
+        if spec.memory_pct > 0 {
+            let reader_pct = spec.memory_pct / 2;
+            let matcher_pct = spec.memory_pct - reader_pct;
+            assign(reader_pct, NeuronType::MemoryReader, &mut specialized);
+            assign(matcher_pct, NeuronType::MemoryMatcher, &mut specialized);
+        }
+
+        if specialized > 0 {
+            log::debug!(
+                "[TYPE_SEED] {}: specialized {} of {} eligible neurons",
+                self.name, specialized, total
+            );
+        }
+
+        specialized
+    }
+
     /// Step the pool forward one tick (no external I/O — backward compatible).
     ///
     /// Equivalent to `tick(input_currents, &mut NullIO)`. All specialized neuron
@@ -685,7 +810,12 @@ impl NeuronPool {
                 self.neurons.spike_out[i] = true;
                 self.spike_window[i] = true; // Accumulate into measurement window
                 self.neurons.membrane[i] = self.config.reset_potential;
-                self.neurons.refract_remaining[i] = self.config.refractory_ticks;
+                // Per-profile refractory: 0 = use profile default, non-zero = global override
+                self.neurons.refract_remaining[i] = if self.config.refractory_ticks == 0 {
+                    crate::neuron::NeuronProfile::from_flags(self.neurons.flags[i]).default_refractory()
+                } else {
+                    self.config.refractory_ticks
+                };
 
                 // Post-synaptic trace bump (this neuron just fired)
                 self.neurons.trace[i] = self.neurons.trace[i].saturating_add(self.config.stdp_positive);
@@ -750,7 +880,7 @@ impl NeuronPool {
             }
         }
 
-        // 4. Homeostatic threshold adjustment
+        // 4. Homeostatic threshold adjustment (per-profile scaled)
         if self.config.homeostatic_rate > 0 && self.tick_count % 100 == 0 {
             let rate = self.config.homeostatic_rate as i16;
             for i in 0..n {
@@ -758,14 +888,28 @@ impl NeuronPool {
                 let spiked = if self.neurons.spike_out[i] { 256u16 } else { 0 };
                 self.spike_rate[i] = ((self.spike_rate[i] as u32 * 255 + spiked as u32) / 256) as u16;
 
+                // Per-profile adaptation scale:
+                //   FastSpiking → 2x (interneurons adapt quickly to maintain fast inhibition)
+                //   IntrinsicBursting → 0 (no homeostatic adaptation, preserves bursting capability)
+                //   RegularSpiking → 1x (normal)
+                let profile = crate::neuron::NeuronProfile::from_flags(self.neurons.flags[i]);
+                let adapt_scale: i16 = match profile {
+                    crate::neuron::NeuronProfile::FastSpiking => 2,
+                    crate::neuron::NeuronProfile::IntrinsicBursting => 0,
+                    _ => 1,
+                };
+
+                if adapt_scale == 0 { continue; }
+                let scaled_rate = rate * adapt_scale;
+
                 // Target rate: ~5% of ticks should produce a spike (= ~13 in Q8.8)
                 let target_rate = 13u16;
                 if self.spike_rate[i] > target_rate * 2 {
                     // Firing too much — raise threshold
-                    self.neurons.threshold[i] = self.neurons.threshold[i].saturating_add(rate);
+                    self.neurons.threshold[i] = self.neurons.threshold[i].saturating_add(scaled_rate);
                 } else if self.spike_rate[i] < target_rate / 2 {
                     // Too silent — lower threshold
-                    self.neurons.threshold[i] = self.neurons.threshold[i].saturating_sub(rate);
+                    self.neurons.threshold[i] = self.neurons.threshold[i].saturating_sub(scaled_rate);
                 }
             }
         }
@@ -927,6 +1071,7 @@ impl NeuronPool {
         self.spike_rate.extend(std::iter::repeat(0u16).take(n_add));
         self.spike_window.extend(std::iter::repeat(false).take(n_add));
         self.spike_counts.extend(std::iter::repeat(0u32).take(n_add));
+        self.chem_exposure.extend(std::iter::repeat(0u8).take(n_add));
 
         // Extend delay buffer
         self.delay_buf.extend(n_add);
@@ -1031,6 +1176,7 @@ impl NeuronPool {
         compact_vec!(self.spike_rate);
         compact_vec!(self.spike_window);
         compact_vec!(self.spike_counts);
+        compact_vec!(self.chem_exposure);
 
         // Shrink delay buffer
         self.delay_buf.shrink_to(n_after as usize);
@@ -1967,5 +2113,89 @@ mod tests {
         assert_eq!(loaded.growth_ratio(), 1.0);
 
         std::fs::remove_file(&path).ok();
+    }
+
+    // ====================================================================
+    // Per-type refractory tests (Gap 1)
+    // ====================================================================
+
+    #[test]
+    fn per_type_refractory_periods() {
+        use crate::neuron::{NeuronProfile, flags};
+
+        // Use refractory_ticks = 0 to enable per-profile defaults
+        let mut config = PoolConfig::default();
+        config.refractory_ticks = 0;
+        let mut pool = NeuronPool::new("test", 4, config);
+
+        // Neuron 0: FastSpiking (refractory = 1)
+        pool.neurons.flags[0] = flags::encode(true, NeuronProfile::FastSpiking);
+        // Neuron 1: IntrinsicBursting (refractory = 3)
+        pool.neurons.flags[1] = flags::encode(false, NeuronProfile::IntrinsicBursting);
+        // Neuron 2: RegularSpiking (refractory = 2) — default excitatory
+        // Neuron 3: RegularSpiking (refractory = 2) — default excitatory
+
+        // Force both neurons above threshold
+        let strong_input = vec![8000i16; 4];
+
+        // Tick 1: both spike
+        pool.tick_simple(&strong_input);
+        assert!(pool.neurons.spike_out[0], "n0 should spike");
+        assert!(pool.neurons.spike_out[1], "n1 should spike");
+
+        // Check refractory periods set correctly
+        assert_eq!(pool.neurons.refract_remaining[0], 1, "FastSpiking should have refract=1");
+        assert_eq!(pool.neurons.refract_remaining[1], 3, "IntrinsicBursting should have refract=3");
+        assert_eq!(pool.neurons.refract_remaining[2], 2, "RegularSpiking should have refract=2");
+
+        // Tick 2: n0 refractory (refract=1 → decrements to 0, skips), n1 refractory (refract=3 → 2)
+        pool.tick_simple(&strong_input);
+        assert!(!pool.neurons.spike_out[0], "FastSpiking still in 1-tick refractory");
+        assert!(!pool.neurons.spike_out[1], "IntrinsicBursting still refractory");
+
+        // Tick 3: n0 recovers (refract now 0), n1 still (refract=2 → 1)
+        pool.tick_simple(&strong_input);
+        assert!(pool.neurons.spike_out[0], "FastSpiking should fire after 1 dead tick");
+        assert!(!pool.neurons.spike_out[1], "IntrinsicBursting still refractory");
+
+        // Tick 4: n1 still refractory (refract=1 → 0)
+        pool.tick_simple(&strong_input);
+        assert!(!pool.neurons.spike_out[1], "IntrinsicBursting still refractory");
+
+        // Tick 5: n1 recovers (refract now 0)
+        pool.tick_simple(&strong_input);
+        assert!(pool.neurons.spike_out[1], "IntrinsicBursting should fire after 3 dead ticks");
+    }
+
+    // ====================================================================
+    // Per-type threshold adaptation tests (Gap 2)
+    // ====================================================================
+
+    #[test]
+    fn threshold_adaptation_intrinsic_bursting_stable() {
+        use crate::neuron::{NeuronProfile, flags};
+
+        let mut config = PoolConfig::default();
+        config.homeostatic_rate = 1;
+        let mut pool = NeuronPool::new("test", 4, config);
+
+        // Set neuron 0 to IntrinsicBursting
+        pool.neurons.flags[0] = flags::encode(false, NeuronProfile::IntrinsicBursting);
+        pool.neurons.leak[0] = NeuronProfile::IntrinsicBursting.default_leak();
+
+        let initial_threshold = pool.neurons.threshold[0];
+
+        // Force lots of activity to trigger homeostatic adjustment
+        // (homeostatic runs every 100 ticks)
+        let strong_input = vec![8000i16; 4];
+        for _ in 0..200 {
+            pool.tick_simple(&strong_input);
+        }
+
+        // IntrinsicBursting should NOT have its threshold adjusted (adapt_scale = 0)
+        assert_eq!(
+            pool.neurons.threshold[0], initial_threshold,
+            "IntrinsicBursting threshold should not adapt homeostatically"
+        );
     }
 }

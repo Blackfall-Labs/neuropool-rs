@@ -85,6 +85,20 @@ impl NeuronProfile {
             Self::Reserved => 4,
         }
     }
+
+    /// Default refractory period for this profile (ticks after spike before firing again).
+    ///
+    /// FastSpiking interneurons recover in 1 tick (high-frequency bursting role).
+    /// IntrinsicBursting neurons have a longer refractory to space out burst clusters.
+    #[inline]
+    pub fn default_refractory(self) -> u8 {
+        match self {
+            Self::RegularSpiking => 2,
+            Self::FastSpiking => 1,       // rapid recovery — sustains high firing rate
+            Self::IntrinsicBursting => 3, // longer gap — burst then pause
+            Self::Reserved => 2,
+        }
+    }
 }
 
 /// Flags byte encoding:

@@ -16,6 +16,8 @@ pub struct GrowthResult {
     pub neurons_pruned: u32,
     /// Pool size after the cycle.
     pub new_size: u32,
+    /// Number of neurons that changed type this cycle.
+    pub type_mutations: u32,
 }
 
 impl NeuronPool {
@@ -211,6 +213,82 @@ impl NeuronPool {
         pruned
     }
 
+    /// Activity-driven neuron type mutation — Computational neurons transition
+    /// to specialized types based on sustained evidence.
+    ///
+    /// Criteria:
+    /// - **→ Gate**: high chemical exposure (chem_exposure > 180) — neuron consistently
+    ///   exposed to neuromodulators, evolves chemical sensitivity.
+    /// - **→ Oscillator**: neuron fires at regular intervals (stable spike rate between
+    ///   10-30 in Q8.8) — develops autonomous oscillation.
+    /// - Only Computational excitatory neurons are candidates.
+    /// - Max mutations per call: n_neurons / 64.
+    ///
+    /// Returns the number of neurons that changed type.
+    pub fn type_plasticity(&mut self, da: u8, seed: u64) -> u32 {
+        use crate::neuron::{NeuronType, NeuronProfile, flags};
+
+        // DA must be above threshold for plasticity to be active
+        if da < 150 {
+            return 0;
+        }
+
+        let n = self.n_neurons as usize;
+        let max_mutations = (n / 64).max(1);
+        let mut mutations = 0u32;
+
+        // Update chemical exposure (exponential moving average: 7/8 old + 1/8 new)
+        for i in 0..n {
+            let old = self.chem_exposure[i] as u16;
+            let new_sample = da as u16;
+            self.chem_exposure[i] = ((old * 7 + new_sample) / 8) as u8;
+        }
+
+        // Simple LCG for tie-breaking
+        let mut rng = seed;
+        let lcg = |s: &mut u64| -> u64 {
+            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s >> 33
+        };
+
+        for i in 0..n {
+            if mutations >= max_mutations as u32 { break; }
+
+            let f = self.neurons.flags[i];
+            // Only mutate Computational excitatory neurons
+            if flags::is_inhibitory(f) { continue; }
+            if flags::neuron_type(f) != NeuronType::Computational { continue; }
+
+            let profile = NeuronProfile::from_flags(f);
+
+            // Check for Gate transition: sustained chemical exposure
+            if self.chem_exposure[i] > 180 {
+                self.neurons.flags[i] = flags::encode_full(false, profile, NeuronType::Gate);
+                mutations += 1;
+                continue;
+            }
+
+            // Check for Oscillator transition: stable moderate firing rate
+            // spike_rate is Q8.8 (~13 = 5% target). Range 8-25 is "rhythmic"
+            if self.spike_rate[i] >= 8 && self.spike_rate[i] <= 25 {
+                // Additional randomness: only ~25% of eligible neurons actually transition
+                if lcg(&mut rng) % 4 == 0 {
+                    self.neurons.flags[i] = flags::encode_full(false, profile, NeuronType::Oscillator);
+                    mutations += 1;
+                }
+            }
+        }
+
+        if mutations > 0 {
+            log::info!(
+                "[TYPE_PLASTICITY] {}: {} neurons mutated type (DA={})",
+                self.name, mutations, da
+            );
+        }
+
+        mutations
+    }
+
     /// Chemical-gated growth cycle — decides whether to grow or prune neurons.
     ///
     /// Growth signal is computed from DA, ACh, and NE above baseline (128).
@@ -276,14 +354,17 @@ impl NeuronPool {
 
         result.new_size = self.n_neurons;
 
+        // Type plasticity — Computational neurons may mutate to specialized types
+        result.type_mutations = self.type_plasticity(da, seed);
+
         // Reset activity counters for next observation window
         self.reset_activities();
 
-        if result.neurons_grown > 0 || result.neurons_pruned > 0 {
+        if result.neurons_grown > 0 || result.neurons_pruned > 0 || result.type_mutations > 0 {
             log::info!(
-                "[GROWTH] {}: +{} grown, -{} pruned → {} neurons (growth_sig={}, prune_sig={})",
+                "[GROWTH] {}: +{} grown, -{} pruned, ~{} mutated → {} neurons (growth_sig={}, prune_sig={})",
                 self.name, result.neurons_grown, result.neurons_pruned,
-                result.new_size, growth_signal, prune_signal
+                result.type_mutations, result.new_size, growth_signal, prune_signal
             );
         }
 
@@ -484,5 +565,103 @@ mod tests {
         let pruned = pool.prune_dead();
         assert_eq!(pruned, 3);
         assert_eq!(pool.synapse_count(), initial - 3);
+    }
+
+    // ====================================================================
+    // Type seeding tests (Gap 3)
+    // ====================================================================
+
+    #[test]
+    fn type_seeding_respects_percentages() {
+        use crate::neuron::{NeuronType, flags};
+        use crate::pool::TypeDistributionSpec;
+
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 100, 0.02, Default::default(), 42);
+
+        let spec = TypeDistributionSpec {
+            gate_pct: 20,
+            oscillator_pct: 10,
+            sensory_pct: 0,
+            motor_pct: 0,
+            memory_pct: 0,
+        };
+
+        let specialized = pool.seed_type_distribution(&spec, 42);
+        assert!(specialized > 0, "should specialize some neurons");
+
+        // Count Gate neurons among all excitatory
+        let n_gate = (0..pool.n_neurons as usize)
+            .filter(|&i| flags::neuron_type(pool.neurons.flags[i]) == NeuronType::Gate)
+            .count();
+
+        let n_osc = (0..pool.n_neurons as usize)
+            .filter(|&i| flags::neuron_type(pool.neurons.flags[i]) == NeuronType::Oscillator)
+            .count();
+
+        // ~20% of excitatory non-boundary neurons should be Gate
+        assert!(n_gate >= 10, "expected >= 10 Gate neurons, got {}", n_gate);
+        assert!(n_osc >= 5, "expected >= 5 Oscillator neurons, got {}", n_osc);
+
+        // Inhibitory neurons should NOT be reassigned
+        for i in 0..pool.n_neurons as usize {
+            if flags::is_inhibitory(pool.neurons.flags[i]) {
+                assert_eq!(
+                    flags::neuron_type(pool.neurons.flags[i]),
+                    NeuronType::Computational,
+                    "inhibitory neuron {} should remain Computational", i
+                );
+            }
+        }
+    }
+
+    // ====================================================================
+    // Type mutation tests (Gap 4)
+    // ====================================================================
+
+    #[test]
+    fn type_mutation_computational_to_gate() {
+        use crate::neuron::{NeuronType, flags};
+
+        let mut pool = NeuronPool::new("test", 64, PoolConfig::default());
+
+        // Simulate sustained high DA exposure over many growth cycles
+        // Each call to type_plasticity updates chem_exposure EMA
+        for cycle in 0..20 {
+            let mutations = pool.type_plasticity(220, 42 + cycle);
+            let _ = mutations; // might be 0 in early cycles
+        }
+
+        // After sustained high DA, some Computational neurons should become Gate
+        let n_gate = (0..pool.n_neurons as usize)
+            .filter(|&i| {
+                flags::is_excitatory(pool.neurons.flags[i])
+                    && flags::neuron_type(pool.neurons.flags[i]) == NeuronType::Gate
+            })
+            .count();
+
+        assert!(n_gate > 0, "sustained DA exposure should mutate some neurons to Gate, got 0");
+    }
+
+    #[test]
+    fn type_mutation_no_change_without_da() {
+        use crate::neuron::{NeuronType, flags};
+
+        let mut pool = NeuronPool::new("test", 64, PoolConfig::default());
+
+        // Low DA — no mutations should happen
+        for cycle in 0..20 {
+            let mutations = pool.type_plasticity(100, 42 + cycle);
+            assert_eq!(mutations, 0, "low DA should not trigger mutations");
+        }
+
+        // All excitatory should still be Computational
+        for i in 0..pool.n_neurons as usize {
+            if flags::is_excitatory(pool.neurons.flags[i]) {
+                assert_eq!(
+                    flags::neuron_type(pool.neurons.flags[i]),
+                    NeuronType::Computational,
+                );
+            }
+        }
     }
 }

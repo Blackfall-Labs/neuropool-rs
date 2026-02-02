@@ -23,6 +23,6 @@ pub use binding::{BindingConfig, BindingTable};
 pub use io::{NeuronIO, NullIO};
 pub use neuron::{NeuronArrays, NeuronProfile, NeuronType};
 pub use synapse::{Synapse, SynapseStore, ThermalState};
-pub use pool::{GrowthConfig, NeuronPool, PoolConfig, SpatialDims};
+pub use pool::{GrowthConfig, NeuronPool, PoolConfig, SpatialDims, TypeDistributionSpec};
 pub use plasticity::GrowthResult;
 pub use stats::{PoolStats, ThermalDistribution, TypeDistribution};

@@ -401,6 +401,7 @@ impl NeuronPool {
             spike_window: vec![false; delay_buf_n],
             spike_counts,
             initial_neuron_count,
+            chem_exposure: vec![0u8; delay_buf_n],
             config,
         })
     }
