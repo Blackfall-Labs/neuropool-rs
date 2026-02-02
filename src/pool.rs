@@ -185,6 +185,40 @@ impl Default for TypeDistributionSpec {
     }
 }
 
+/// Parameters for binding specialized neurons to external resources.
+///
+/// After `seed_type_distribution()` assigns neuron types, `seed_bindings()` uses
+/// this spec to create `BindingConfig` entries and set `binding_slot` on each
+/// specialized neuron. Without bindings, all specialized neurons silently behave
+/// as plain Computational neurons (the `if binding_slot > 0` guards in tick skip them).
+#[derive(Clone, Debug)]
+pub struct BindingSpec {
+    /// Sensory: which field to read (field_id for NeuronIO::read_sensory).
+    pub sensory_field_id: u8,
+    /// Sensory: total field width — offsets are distributed evenly across neurons.
+    pub sensory_field_width: u16,
+    /// Motor: output channel ID for NeuronIO::write_motor.
+    pub motor_channel_id: u8,
+    /// Motor: magnitude scale factor (0-255).
+    pub motor_scale: u8,
+    /// Gate: chemical IDs to cycle across gate neurons (NeuronIO::read_chemical).
+    pub gate_chemicals: Vec<u8>,
+    /// Gate: sensitivity to chemical modulation (0-255).
+    pub gate_sensitivity: u8,
+    /// Oscillator: base period in ticks (varied per neuron with jitter).
+    pub oscillator_base_period: u8,
+    /// Oscillator: peak depolarization amplitude (0-255, scaled by 64 in tick).
+    pub oscillator_amplitude: u8,
+    /// MemoryReader: bank slot for NeuronIO::memory_query.
+    pub memory_bank_slot: u8,
+    /// MemoryReader: query dimension (typically 8 = gather_local_pattern size).
+    pub memory_query_dim: u8,
+    /// MemoryReader: number of top results to consider.
+    pub memory_top_k: u8,
+    /// MemoryMatcher: minimum match threshold (0-255).
+    pub memory_match_threshold: u8,
+}
+
 /// Input signals for computing region fitness during evolution.
 ///
 /// These are collected by the brain runtime (astromind-v3) and passed down
@@ -869,6 +903,138 @@ impl NeuronPool {
         specialized
     }
 
+    /// Create BindingConfig entries for all typed neurons that lack a binding_slot.
+    ///
+    /// Must be called AFTER `seed_type_distribution()`. Iterates all neurons,
+    /// creates a `BindingConfig` for each specialized type based on the `BindingSpec`,
+    /// and assigns the neuron's `binding_slot` to the new table entry.
+    ///
+    /// Returns the number of neurons successfully bound.
+    pub fn seed_bindings(&mut self, spec: &BindingSpec, seed: u64) -> u32 {
+        use crate::binding::BindingConfig;
+
+        let n = self.n_neurons as usize;
+        let mut bound = 0u32;
+
+        // LCG for deterministic jitter (oscillator period variation)
+        let mut rng = seed;
+        let lcg = |s: &mut u64| -> u64 {
+            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s >> 33
+        };
+
+        // First pass: count neurons of each type for offset distribution
+        let mut sensory_total = 0u32;
+        let mut gate_total = 0u32;
+        let mut oscillator_total = 0u32;
+        for i in 0..n {
+            if self.neurons.binding_slot[i] != 0 { continue; }
+            match flags::neuron_type(self.neurons.flags[i]) {
+                NeuronType::Sensory => sensory_total += 1,
+                NeuronType::Gate => gate_total += 1,
+                NeuronType::Oscillator => oscillator_total += 1,
+                _ => {}
+            }
+        }
+
+        // Second pass: create bindings
+        let mut sensory_idx = 0u32;
+        let mut gate_idx = 0u32;
+        let mut oscillator_idx = 0u32;
+
+        for i in 0..n {
+            if self.neurons.binding_slot[i] != 0 { continue; }
+
+            let ntype = flags::neuron_type(self.neurons.flags[i]);
+            let config = match ntype {
+                NeuronType::Sensory => {
+                    // Distribute offsets evenly across field width
+                    let offset = if sensory_total > 1 {
+                        (sensory_idx as u32 * spec.sensory_field_width as u32
+                            / sensory_total) as u16
+                    } else {
+                        0
+                    };
+                    sensory_idx += 1;
+                    Some(BindingConfig::sensory(spec.sensory_field_id, offset))
+                }
+                NeuronType::Motor => {
+                    Some(BindingConfig::motor(spec.motor_channel_id, spec.motor_scale))
+                }
+                NeuronType::Gate => {
+                    // Cycle through available chemicals
+                    let chem = if spec.gate_chemicals.is_empty() {
+                        0
+                    } else {
+                        spec.gate_chemicals[gate_idx as usize % spec.gate_chemicals.len()]
+                    };
+                    gate_idx += 1;
+                    Some(BindingConfig::gate(chem, spec.gate_sensitivity))
+                }
+                NeuronType::Oscillator => {
+                    // Base period with deterministic jitter (±25%)
+                    let base = spec.oscillator_base_period.max(2) as u32;
+                    let jitter_range = base / 4;
+                    let jitter = if jitter_range > 0 {
+                        (lcg(&mut rng) % (jitter_range as u64 * 2 + 1)) as u32
+                    } else {
+                        0
+                    };
+                    let period = (base - jitter_range + jitter).clamp(2, 255) as u8;
+
+                    // Spread phase offsets evenly across neurons
+                    let phase = if oscillator_total > 1 {
+                        ((oscillator_idx as u32 * period as u32) / oscillator_total) as u8
+                    } else {
+                        0
+                    };
+                    oscillator_idx += 1;
+                    Some(BindingConfig::oscillator(period, spec.oscillator_amplitude, phase))
+                }
+                NeuronType::MemoryReader => {
+                    Some(BindingConfig::memory_reader(
+                        spec.memory_bank_slot,
+                        spec.memory_query_dim,
+                        spec.memory_top_k,
+                    ))
+                }
+                NeuronType::MemoryMatcher => {
+                    Some(BindingConfig::memory_matcher(
+                        spec.memory_bank_slot,
+                        spec.memory_match_threshold,
+                    ))
+                }
+                _ => None, // Computational, Relay — no binding needed
+            };
+
+            if let Some(cfg) = config {
+                if let Some(slot) = self.bindings.add(cfg) {
+                    self.neurons.binding_slot[i] = slot;
+                    bound += 1;
+                } else {
+                    // BindingTable full (255 entries) — stop binding
+                    log::warn!(
+                        "[BINDING] {}: binding table full after {} entries",
+                        self.name, bound
+                    );
+                    break;
+                }
+            }
+        }
+
+        if bound > 0 {
+            log::debug!(
+                "[BINDING] {}: bound {} neurons (S={}, G={}, O={}, M+M={}+{})",
+                self.name, bound,
+                sensory_idx, gate_idx, oscillator_idx,
+                sensory_total.min(bound), // approximate — counts include unbound
+                gate_total.min(bound),
+            );
+        }
+
+        bound
+    }
+
     /// Step the pool forward one tick (no external I/O — backward compatible).
     ///
     /// Equivalent to `tick(input_currents, &mut NullIO)`. All specialized neuron
@@ -943,11 +1109,11 @@ impl NeuronPool {
                 NeuronType::Oscillator if binding_slot > 0 => {
                     if let Some(cfg) = self.bindings.get(binding_slot) {
                         let period = cfg.target.max(1) as u64;
-                        let amplitude = cfg.param_a as i16 * 64; // Scale to Q8.8
+                        let amplitude = cfg.param_a as i32 * 64; // Scale to Q8.8
                         let phase_offset = cfg.param_b as u64;
                         // Ramp depolarization based on tick phase
                         let phase = (self.tick_count.wrapping_add(phase_offset)) % period;
-                        let ramp = (amplitude * phase as i16) / period as i16;
+                        let ramp = ((amplitude * phase as i32) / period as i32).clamp(-32768, 32767) as i16;
                         self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(ramp);
                     }
                 }
