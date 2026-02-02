@@ -10,6 +10,8 @@
 //! store with a single unified substrate where neurons spike AND persist, and
 //! synapses conduct AND have thermal lifecycle.
 
+pub mod binding;
+pub mod io;
 pub mod neuron;
 pub mod synapse;
 pub mod pool;
@@ -17,7 +19,9 @@ pub mod plasticity;
 pub mod codec;
 pub mod stats;
 
-pub use neuron::{NeuronArrays, NeuronProfile};
+pub use binding::{BindingConfig, BindingTable};
+pub use io::{NeuronIO, NullIO};
+pub use neuron::{NeuronArrays, NeuronProfile, NeuronType};
 pub use synapse::{Synapse, SynapseStore, ThermalState};
-pub use pool::{NeuronPool, PoolConfig};
-pub use stats::{PoolStats, ThermalDistribution};
+pub use pool::{NeuronPool, PoolConfig, SpatialDims};
+pub use stats::{PoolStats, ThermalDistribution, TypeDistribution};

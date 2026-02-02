@@ -129,9 +129,26 @@ impl NeuronPool {
 
             let src_flags = self.neurons.flags[src as usize];
 
+            // Distance cutoff for spatial pools: skip targets beyond ~2σ
+            let sigma = self.dims.default_sigma();
+            let max_synaptogenesis_d_sq = if self.dims.h > 1 || self.dims.d > 1 {
+                // Spatial pool: limit new connections to ~2σ radius
+                (2.0 * sigma * 2.0 * sigma) as u32
+            } else {
+                u32::MAX // Flat pool: no distance restriction
+            };
+
             for &tgt in &active_neurons {
                 if src == tgt { continue; }
                 if created >= max_new_per_tick as usize { break; }
+
+                // Distance filter for spatial pools
+                if max_synaptogenesis_d_sq < u32::MAX {
+                    let d_sq = self.dims.distance_sq(src, tgt);
+                    if d_sq > max_synaptogenesis_d_sq {
+                        continue;
+                    }
+                }
 
                 // Check if connection already exists
                 let already_connected = self.synapses.outgoing(src)
@@ -144,7 +161,17 @@ impl NeuronPool {
 
                 // Create new HOT synapse with small weight
                 let magnitude = (lcg_next(&mut rng_state) % 20 + 5) as u8; // 5-24
-                let delay = (lcg_next(&mut rng_state) % self.config.max_delay as u32 + 1) as u8;
+                // Distance-proportional delay for spatial pools
+                let delay = if self.dims.h > 1 || self.dims.d > 1 {
+                    let d_sq = self.dims.distance_sq(src, tgt);
+                    let max_d_sq = self.dims.max_distance_sq();
+                    let sqrt_max = (max_d_sq as f32).sqrt();
+                    let ratio = if sqrt_max > 0.0 { (d_sq as f32).sqrt() / sqrt_max } else { 0.0 };
+                    let d = 1 + (ratio * (self.config.max_delay - 1) as f32) as u8;
+                    d.min(self.config.max_delay).max(1)
+                } else {
+                    (lcg_next(&mut rng_state) % self.config.max_delay as u32 + 1) as u8
+                };
                 let syn = Synapse::new(tgt as u16, magnitude, delay, src_flags);
 
                 self.synapses.add_synapse(src, syn);
@@ -185,7 +212,7 @@ mod tests {
         // Drive some activity to build eligibility traces
         for _ in 0..10 {
             let input: Vec<i16> = (0..50).map(|i| if i < 10 { 8000 } else { 0 }).collect();
-            pool.tick(&input);
+            pool.tick_simple(&input);
         }
 
         // Baseline chemicals — no modulation should happen
@@ -201,7 +228,7 @@ mod tests {
         // Drive activity to build eligibility traces
         for _ in 0..20 {
             let input: Vec<i16> = (0..50).map(|i| if i < 15 { 8000 } else { 0 }).collect();
-            pool.tick(&input);
+            pool.tick_simple(&input);
         }
 
         // Count synapses with nonzero eligibility before
@@ -224,7 +251,7 @@ mod tests {
         // Drive activity
         for _ in 0..20 {
             let input: Vec<i16> = (0..50).map(|i| if i < 15 { 8000 } else { 0 }).collect();
-            pool.tick(&input);
+            pool.tick_simple(&input);
         }
 
         // High cortisol = punishment signal
@@ -248,7 +275,7 @@ mod tests {
         // Drive activity to build traces
         for _ in 0..10 {
             let input: Vec<i16> = (0..20).map(|i| if i < 8 { 8000 } else { 0 }).collect();
-            pool.tick(&input);
+            pool.tick_simple(&input);
         }
 
         // High ACh = gate synaptogenesis
@@ -263,7 +290,7 @@ mod tests {
         // Drive activity
         for _ in 0..10 {
             let input: Vec<i16> = (0..20).map(|i| if i < 8 { 8000 } else { 0 }).collect();
-            pool.tick(&input);
+            pool.tick_simple(&input);
         }
 
         // Low ACh = no synaptogenesis

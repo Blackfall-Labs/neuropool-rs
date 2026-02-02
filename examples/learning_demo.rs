@@ -85,7 +85,7 @@ fn main() {
         let mut total_spikes = 0u32;
 
         for _ in 0..PRESENT_TICKS {
-            pool.tick(&input);
+            pool.tick_simple(&input);
             total_spikes += pool.spike_count();
             let out = pool.read_output(OUTPUT_START..OUTPUT_END);
             output_spikes += out.iter().filter(|s| s.magnitude > 0).count() as u32;
@@ -163,7 +163,7 @@ fn measure_response(pool: &mut NeuronPool, config: &PoolConfig) -> u32 {
     for i in 0..INPUT_END { input[i] = INJECT_CURRENT; }
     let mut output = 0u32;
     for _ in 0..PRESENT_TICKS {
-        pool.tick(&input);
+        pool.tick_simple(&input);
         let out = pool.read_output(OUTPUT_START..OUTPUT_END);
         output += out.iter().filter(|s| s.magnitude > 0).count() as u32;
     }

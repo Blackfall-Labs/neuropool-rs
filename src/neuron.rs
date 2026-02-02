@@ -4,6 +4,51 @@
 //! hot path iterates over dense memory. A single neuron consumes 8 bytes across
 //! all arrays combined.
 
+/// Neuron functional type, encoded in bits 3-5 of the flags byte.
+///
+/// Determines the neuron's behavior during tick():
+/// - Pre-spike: What happens before membrane comparison (Sensory reads input, Gate modulates threshold, Oscillator ramps)
+/// - Post-spike: What happens after firing (Motor writes output, MemoryReader queries bank)
+/// - Non-spike: Special checks on synaptic input (MemoryMatcher compares patterns)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum NeuronType {
+    /// Standard LIF neuron. The default. No special behavior.
+    Computational = 0b000,
+    /// Pre-spike: reads from external field via NeuronIO, adds to membrane.
+    Sensory = 0b001,
+    /// Post-spike: writes magnitude to output channel via NeuronIO.
+    Motor = 0b010,
+    /// Post-spike: queries databank, injects result as current next tick.
+    MemoryReader = 0b011,
+    /// On synaptic input: pattern comparison, boosts membrane on match.
+    MemoryMatcher = 0b100,
+    /// Pre-spike: chemical level modulates firing threshold.
+    Gate = 0b101,
+    /// Standard LIF with low threshold + high fanout (set at creation).
+    Relay = 0b110,
+    /// Pre-spike: autonomous depolarization ramp on phase.
+    Oscillator = 0b111,
+}
+
+impl NeuronType {
+    /// Decode from flags byte (bits 3-5).
+    #[inline]
+    pub fn from_flags(flags: u8) -> Self {
+        match (flags >> 3) & 0b111 {
+            0b000 => Self::Computational,
+            0b001 => Self::Sensory,
+            0b010 => Self::Motor,
+            0b011 => Self::MemoryReader,
+            0b100 => Self::MemoryMatcher,
+            0b101 => Self::Gate,
+            0b110 => Self::Relay,
+            0b111 => Self::Oscillator,
+            _ => unreachable!(),
+        }
+    }
+}
+
 /// Neuron firing profile, encoded in bits 1-2 of the flags byte.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
@@ -45,7 +90,8 @@ impl NeuronProfile {
 /// Flags byte encoding:
 /// - Bit 0: 0 = excitatory, 1 = inhibitory
 /// - Bits 1-2: NeuronProfile
-/// - Bits 3-7: reserved
+/// - Bits 3-5: NeuronType
+/// - Bits 6-7: reserved
 pub mod flags {
     pub const INHIBITORY_BIT: u8 = 0x01;
 
@@ -59,28 +105,43 @@ pub mod flags {
         !is_inhibitory(f)
     }
 
+    /// Decode neuron type from flags byte (bits 3-5).
+    #[inline]
+    pub fn neuron_type(f: u8) -> super::NeuronType {
+        super::NeuronType::from_flags(f)
+    }
+
+    /// Encode flags byte with inhibitory, profile, and type (default Computational).
     #[inline]
     pub fn encode(inhibitory: bool, profile: super::NeuronProfile) -> u8 {
+        encode_full(inhibitory, profile, super::NeuronType::Computational)
+    }
+
+    /// Encode flags byte with all fields: inhibitory, profile, and neuron type.
+    #[inline]
+    pub fn encode_full(inhibitory: bool, profile: super::NeuronProfile, ntype: super::NeuronType) -> u8 {
         let mut f = 0u8;
         if inhibitory {
             f |= INHIBITORY_BIT;
         }
         f |= (profile as u8) << 1;
+        f |= (ntype as u8) << 3;
         f
     }
 }
 
 /// SoA neuron storage — each field is a separate contiguous array.
 ///
-/// For N neurons, each Vec has exactly N elements. Total memory per neuron: 8 bytes.
+/// For N neurons, each Vec has exactly N elements. Total memory per neuron: 9 bytes.
 ///
 /// Layout per neuron across arrays:
 /// - membrane:          2 bytes (i16, Q8.8 fixed-point)
 /// - threshold:         2 bytes (i16, Q8.8 adaptive threshold)
 /// - leak:              1 byte  (u8, leak rate)
 /// - refract_remaining: 1 byte  (u8, refractory countdown)
-/// - flags:             1 byte  (u8, excitatory/inhibitory + profile)
+/// - flags:             1 byte  (u8, excitatory/inhibitory + profile + type)
 /// - trace:             1 byte  (i8, post-synaptic eligibility trace)
+/// - binding_slot:      1 byte  (u8, index into BindingTable; 0 = no binding)
 pub struct NeuronArrays {
     /// Q8.8 fixed-point membrane potential. Resting ~ -17920 (-70 * 256).
     pub membrane: Vec<i16>,
@@ -99,6 +160,9 @@ pub struct NeuronArrays {
     pub trace: Vec<i8>,
     /// Did this neuron spike this tick? Cleared at start of each tick.
     pub spike_out: Vec<bool>,
+    /// Index into the pool's BindingTable. 0 = no binding (Computational neuron).
+    /// Values 1-255 map to BindingConfig entries for specialized neurons.
+    pub binding_slot: Vec<u8>,
 }
 
 impl NeuronArrays {
@@ -134,6 +198,7 @@ impl NeuronArrays {
             flags: flags_vec,
             trace: vec![0i8; n],
             spike_out: vec![false; n],
+            binding_slot: vec![0u8; n],
         }
     }
 

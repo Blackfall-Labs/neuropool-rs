@@ -20,7 +20,8 @@ use crate::pool::{NeuronPool, PoolConfig};
 use crate::synapse::{Synapse, SynapseStore};
 
 const MAGIC: &[u8; 4] = b"POOL";
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
+const VERSION_V1: u16 = 1;
 
 /// Simple CRC32 (same polynomial as thermogram-rs for consistency)
 fn crc32(data: &[u8]) -> u32 {
@@ -178,6 +179,7 @@ fn deserialize_neurons(r: &mut &[u8], n: usize) -> io::Result<NeuronArrays> {
         flags,
         trace,
         spike_out,
+        binding_slot: vec![0u8; n],
     })
 }
 
@@ -225,7 +227,7 @@ fn deserialize_synapses(r: &mut &[u8]) -> io::Result<SynapseStore> {
 }
 
 impl NeuronPool {
-    /// Save pool state to a binary .pool file.
+    /// Save pool state to a binary .pool file (v2 format).
     pub fn save(&self, path: &Path) -> io::Result<()> {
         let mut body = Vec::with_capacity(self.n_neurons as usize * 16);
 
@@ -239,6 +241,27 @@ impl NeuronPool {
         serialize_config(&mut body, &self.config);
         serialize_neurons(&mut body, &self.neurons, self.n_neurons as usize);
         serialize_synapses(&mut body, &self.synapses);
+
+        // v2 additions: dims, binding_slot, BindingTable
+        write_u16(&mut body, self.dims.w);
+        write_u16(&mut body, self.dims.h);
+        write_u16(&mut body, self.dims.d);
+
+        // binding_slot array (1 byte per neuron)
+        let n = self.n_neurons as usize;
+        for i in 0..n {
+            write_u8(&mut body, self.neurons.binding_slot[i]);
+        }
+
+        // BindingTable: entry count + entries
+        let entries = self.bindings.entries();
+        write_u16(&mut body, entries.len() as u16);
+        for entry in entries {
+            write_u8(&mut body, entry.target);
+            write_u8(&mut body, entry.param_a);
+            write_u8(&mut body, entry.param_b);
+            write_u8(&mut body, entry.flags);
+        }
 
         let checksum = crc32(&body);
 
@@ -254,7 +277,7 @@ impl NeuronPool {
         std::fs::write(path, &file_data)
     }
 
-    /// Load pool state from a binary .pool file.
+    /// Load pool state from a binary .pool file (v1 or v2).
     pub fn load(path: &Path) -> io::Result<Self> {
         let file_data = std::fs::read(path)?;
         if file_data.len() < 16 {
@@ -266,7 +289,7 @@ impl NeuronPool {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "bad magic"));
         }
         let version = u16::from_le_bytes([file_data[4], file_data[5]]);
-        if version != VERSION {
+        if version != VERSION && version != VERSION_V1 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("unsupported version: {}", version),
@@ -301,15 +324,49 @@ impl NeuronPool {
         }
 
         let config = deserialize_config(&mut r)?;
-        let neurons = deserialize_neurons(&mut r, n_neurons as usize)?;
+        let mut neurons = deserialize_neurons(&mut r, n_neurons as usize)?;
         let synapses = deserialize_synapses(&mut r)?;
+
+        // v2 additions: dims, binding_slot, BindingTable
+        let (dims, bindings) = if version >= VERSION {
+            let w = read_u16(&mut r)?;
+            let h = read_u16(&mut r)?;
+            let d = read_u16(&mut r)?;
+            let dims = super::pool::SpatialDims::new(w, h, d);
+
+            // binding_slot array
+            let n = n_neurons as usize;
+            for i in 0..n {
+                neurons.binding_slot[i] = read_u8(&mut r)?;
+            }
+
+            // BindingTable
+            let entry_count = read_u16(&mut r)? as usize;
+            let mut entries = Vec::with_capacity(entry_count);
+            for _ in 0..entry_count {
+                entries.push(crate::binding::BindingConfig {
+                    target: read_u8(&mut r)?,
+                    param_a: read_u8(&mut r)?,
+                    param_b: read_u8(&mut r)?,
+                    flags: read_u8(&mut r)?,
+                });
+            }
+            let bindings = crate::binding::BindingTable::from_entries(entries);
+
+            (dims, bindings)
+        } else {
+            // v1 backward compat: flat dims, no bindings
+            (super::pool::SpatialDims::flat(n_neurons), crate::binding::BindingTable::new())
+        };
 
         let delay_buf_n = n_neurons as usize;
 
         Ok(Self {
             name,
+            dims,
             neurons,
             synapses,
+            bindings,
             n_neurons,
             n_excitatory,
             n_inhibitory,
@@ -354,7 +411,7 @@ mod tests {
         // Run some ticks to create state
         for _ in 0..10 {
             let input: Vec<i16> = (0..50).map(|i| if i < 10 { 5000 } else { 0 }).collect();
-            pool.tick(&input);
+            pool.tick_simple(&input);
         }
 
         let path = std::env::temp_dir().join("neuropool_test_connected.pool");

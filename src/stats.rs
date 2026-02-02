@@ -1,6 +1,7 @@
 //! Pool inspection and diagnostics.
 
-use crate::pool::NeuronPool;
+use crate::neuron::{NeuronType, flags};
+use crate::pool::{NeuronPool, SpatialDims};
 use crate::synapse::{ThermalState, maturity};
 
 /// Distribution of synapses across thermal states.
@@ -29,10 +30,24 @@ impl std::fmt::Display for ThermalDistribution {
     }
 }
 
+/// Distribution of neurons across NeuronType variants.
+#[derive(Clone, Debug, Default)]
+pub struct TypeDistribution {
+    pub computational: u32,
+    pub sensory: u32,
+    pub motor: u32,
+    pub memory_reader: u32,
+    pub memory_matcher: u32,
+    pub gate: u32,
+    pub relay: u32,
+    pub oscillator: u32,
+}
+
 /// Summary statistics for a neuron pool.
 #[derive(Clone, Debug)]
 pub struct PoolStats {
     pub name: String,
+    pub dims: SpatialDims,
     pub n_neurons: u32,
     pub n_excitatory: u32,
     pub n_inhibitory: u32,
@@ -40,14 +55,16 @@ pub struct PoolStats {
     pub tick_count: u64,
     pub last_spike_count: u32,
     pub thermal: ThermalDistribution,
+    pub types: TypeDistribution,
     pub mean_weight_magnitude: f32,
     pub mean_eligibility_magnitude: f32,
 }
 
 impl std::fmt::Display for PoolStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Pool '{}': {} neurons ({}E/{}I), {} synapses",
-            self.name, self.n_neurons, self.n_excitatory, self.n_inhibitory, self.n_synapses)?;
+        writeln!(f, "Pool '{}': {} neurons ({}E/{}I), {} synapses, dims={}x{}x{}",
+            self.name, self.n_neurons, self.n_excitatory, self.n_inhibitory,
+            self.n_synapses, self.dims.w, self.dims.h, self.dims.d)?;
         writeln!(f, "  Tick: {}, Last spikes: {}", self.tick_count, self.last_spike_count)?;
         writeln!(f, "  Thermal: {}", self.thermal)?;
         writeln!(f, "  Mean |weight|: {:.1}, Mean |eligibility|: {:.1}",
@@ -77,9 +94,28 @@ impl NeuronPool {
         dist
     }
 
+    /// Compute neuron type distribution.
+    pub fn type_distribution(&self) -> TypeDistribution {
+        let mut dist = TypeDistribution::default();
+        for &f in &self.neurons.flags {
+            match flags::neuron_type(f) {
+                NeuronType::Computational => dist.computational += 1,
+                NeuronType::Sensory => dist.sensory += 1,
+                NeuronType::Motor => dist.motor += 1,
+                NeuronType::MemoryReader => dist.memory_reader += 1,
+                NeuronType::MemoryMatcher => dist.memory_matcher += 1,
+                NeuronType::Gate => dist.gate += 1,
+                NeuronType::Relay => dist.relay += 1,
+                NeuronType::Oscillator => dist.oscillator += 1,
+            }
+        }
+        dist
+    }
+
     /// Compute comprehensive pool statistics.
     pub fn stats(&self) -> PoolStats {
         let thermal = self.thermal_distribution();
+        let types = self.type_distribution();
 
         let n_syn = self.synapses.total_synapses();
         let (weight_sum, elig_sum) = self.synapses.synapses.iter().fold((0u64, 0u64), |(ws, es), s| {
@@ -91,6 +127,7 @@ impl NeuronPool {
 
         PoolStats {
             name: self.name.clone(),
+            dims: self.dims,
             n_neurons: self.n_neurons,
             n_excitatory: self.n_excitatory,
             n_inhibitory: self.n_inhibitory,
@@ -98,6 +135,7 @@ impl NeuronPool {
             tick_count: self.tick_count,
             last_spike_count: self.last_spike_count,
             thermal,
+            types,
             mean_weight_magnitude: mean_weight,
             mean_eligibility_magnitude: mean_elig,
         }
