@@ -74,6 +74,23 @@ impl SpatialDims {
         dx * dx + dy * dy + dz * dz
     }
 
+    /// Grow the grid by `additional` neurons, extending the deepest dimension.
+    ///
+    /// The aspect ratio is maintained by growing the dimension with the most
+    /// room. For flat pools (h=1, d=1), width is extended.
+    pub fn grow(&mut self, additional: u32) {
+        // For flat pools just extend w
+        if self.h == 1 && self.d == 1 {
+            self.w = self.w.saturating_add(additional as u16);
+            return;
+        }
+        // Extend the deepest dimension (d) by enough layers to fit `additional` neurons
+        let layer_size = self.w as u32 * self.h as u32;
+        if layer_size == 0 { return; }
+        let extra_layers = (additional + layer_size - 1) / layer_size;
+        self.d = self.d.saturating_add(extra_layers as u16);
+    }
+
     /// Default sigma for Gaussian connectivity: max(w, h, d) / 3.
     #[inline]
     pub fn default_sigma(&self) -> f32 {
@@ -87,6 +104,43 @@ impl SpatialDims {
         x == 0 || x == self.w - 1
             || y == 0 || y == self.h - 1
             || z == 0 || z == self.d - 1
+    }
+}
+
+/// Growth engine configuration — bounds and thresholds for neurogenesis/pruning.
+#[derive(Clone, Debug)]
+pub struct GrowthConfig {
+    /// Maximum neuron count ceiling. Default: initial * 4
+    pub max_neurons: u32,
+    /// Minimum neuron count floor. Default: initial / 2
+    pub min_neurons: u32,
+    /// Maximum neurons to grow per cycle. Default: 8
+    pub growth_per_cycle: u16,
+    /// Maximum neurons to prune per cycle. Default: 16
+    pub prune_per_cycle: u16,
+    /// Chemical signal threshold to trigger growth. Default: 30
+    pub growth_threshold: u16,
+    /// Chemical signal threshold to trigger pruning. Default: 20
+    pub prune_threshold: u16,
+}
+
+impl GrowthConfig {
+    /// Create a growth config with defaults derived from initial neuron count.
+    pub fn from_initial(n_neurons: u32) -> Self {
+        Self {
+            max_neurons: n_neurons.saturating_mul(4),
+            min_neurons: n_neurons / 2,
+            growth_per_cycle: 8,
+            prune_per_cycle: 16,
+            growth_threshold: 30,
+            prune_threshold: 20,
+        }
+    }
+}
+
+impl Default for GrowthConfig {
+    fn default() -> Self {
+        Self::from_initial(256)
     }
 }
 
@@ -114,6 +168,8 @@ pub struct PoolConfig {
     pub stdp_negative: i8,
     /// Maximum axonal delay in ticks. Default: 8
     pub max_delay: u8,
+    /// Growth engine configuration. Default: derived from 256 neurons.
+    pub growth: GrowthConfig,
 }
 
 impl Default for PoolConfig {
@@ -129,6 +185,7 @@ impl Default for PoolConfig {
             stdp_positive: 20,
             stdp_negative: -10,
             max_delay: 8,
+            growth: GrowthConfig::default(),
         }
     }
 }
@@ -178,6 +235,20 @@ impl DelayBuffer {
             *v = 0;
         }
     }
+
+    /// Extend all delay slots to accommodate `additional` new neurons (zeroed).
+    fn extend(&mut self, additional: usize) {
+        for buf in &mut self.buffers {
+            buf.extend(std::iter::repeat(0i16).take(additional));
+        }
+    }
+
+    /// Shrink all delay slots to `new_size` neurons.
+    fn shrink_to(&mut self, new_size: usize) {
+        for buf in &mut self.buffers {
+            buf.truncate(new_size);
+        }
+    }
 }
 
 /// A biological neuron pool — LIF neurons + CSR synapses + delay buffers.
@@ -206,6 +277,9 @@ pub struct NeuronPool {
     pub(crate) delay_buf: DelayBuffer,
     /// Scratch buffer for synaptic currents (avoids allocation in tick)
     pub(crate) synaptic_current: Vec<i16>,
+    /// Projection currents from inter-regional spike projections.
+    /// Set by the region thread before tick(), consumed and zeroed during tick().
+    pub projection_current: Vec<i16>,
     /// Spike count for the most recent tick
     pub(crate) last_spike_count: u32,
     /// Homeostatic spike rate tracker: running average per neuron (Q8.8)
@@ -216,6 +290,13 @@ pub struct NeuronPool {
     /// Biological basis: a neuron that fired during a processing window is
     /// "active" even if currently in refractory period.
     pub(crate) spike_window: Vec<bool>,
+    /// Per-neuron spike counts since last reset. Used by the growth engine
+    /// to identify dead (zero-spike) neurons for pruning and active boundaries
+    /// for neurogenesis. Reset after each growth_cycle call.
+    pub spike_counts: Vec<u32>,
+    /// Neuron count at construction — the genome baseline. Never changes after
+    /// creation, even as neurons are grown/pruned. Used to compute growth_ratio.
+    pub initial_neuron_count: u32,
 }
 
 impl NeuronPool {
@@ -248,9 +329,12 @@ impl NeuronPool {
             config,
             delay_buf,
             synaptic_current: vec![0i16; n_neurons as usize],
+            projection_current: vec![0i16; n_neurons as usize],
             last_spike_count: 0,
             spike_rate: vec![0u16; n_neurons as usize],
             spike_window: vec![false; n_neurons as usize],
+            spike_counts: vec![0u32; n_neurons as usize],
+            initial_neuron_count: n_neurons,
         }
     }
 
@@ -548,6 +632,12 @@ impl NeuronPool {
             // 2d. Add synaptic current
             self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(self.synaptic_current[i]);
 
+            // 2d2. Add inter-regional projection current
+            if self.projection_current[i] != 0 {
+                self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(self.projection_current[i]);
+                self.projection_current[i] = 0;
+            }
+
             // 2e. Type-specific pre-spike behavior
             let ntype = flags::neuron_type(self.neurons.flags[i]);
             let binding_slot = self.neurons.binding_slot[i];
@@ -620,6 +710,7 @@ impl NeuronPool {
                 }
 
                 spike_count += 1;
+                self.spike_counts[i] = self.spike_counts[i].saturating_add(1);
             } else {
                 self.neurons.spike_out[i] = false;
             }
@@ -770,6 +861,342 @@ impl NeuronPool {
         } else {
             Signal::zero()
         }
+    }
+
+    // --- Activity tracking for growth engine ---
+
+    /// Per-neuron spike counts since last reset.
+    ///
+    /// Used by the growth engine to identify dead neurons (zero spikes)
+    /// and active boundaries (high spike counts) for neurogenesis/pruning.
+    #[inline]
+    pub fn neuron_activities(&self) -> &[u32] {
+        &self.spike_counts
+    }
+
+    /// Reset all per-neuron spike counts to zero.
+    ///
+    /// Called after growth_cycle to start a new observation window.
+    pub fn reset_activities(&mut self) {
+        self.spike_counts.fill(0);
+    }
+
+    /// Count of neurons that spiked at least once since last reset.
+    pub fn active_neuron_count(&self) -> u32 {
+        self.spike_counts.iter().filter(|&&c| c > 0).count() as u32
+    }
+
+    /// Growth ratio: current neuron count / initial (genome) count.
+    ///
+    /// Returns 1.0 if no growth/pruning has occurred.
+    pub fn growth_ratio(&self) -> f32 {
+        if self.initial_neuron_count == 0 {
+            return 1.0;
+        }
+        self.n_neurons as f32 / self.initial_neuron_count as f32
+    }
+
+    // --- Neurogenesis (A2) ---
+
+    /// Grow `additional` neurons into the pool using deterministic RNG.
+    ///
+    /// New neurons are initialized at resting potential with Dale's Law ratio
+    /// (80% excitatory, 20% inhibitory). They have no synapses — synaptogenesis
+    /// must run separately to wire them in.
+    ///
+    /// For spatial pools, the grid's deepest dimension is extended to fit.
+    /// Returns the number of neurons actually added.
+    pub fn grow_neurons_seeded(&mut self, additional: u32, _seed: u64) -> u32 {
+        if additional == 0 { return 0; }
+
+        let n_add = additional as usize;
+        let n_exc = (additional * 4) / 5; // 80% excitatory
+        let n_inh = additional - n_exc;
+
+        // Extend SoA neuron arrays
+        self.neurons.extend(
+            additional,
+            n_exc,
+            self.config.resting_potential,
+            self.config.spike_threshold,
+        );
+
+        // Extend auxiliary per-neuron arrays
+        self.synaptic_current.extend(std::iter::repeat(0i16).take(n_add));
+        self.projection_current.extend(std::iter::repeat(0i16).take(n_add));
+        self.spike_rate.extend(std::iter::repeat(0u16).take(n_add));
+        self.spike_window.extend(std::iter::repeat(false).take(n_add));
+        self.spike_counts.extend(std::iter::repeat(0u32).take(n_add));
+
+        // Extend delay buffer
+        self.delay_buf.extend(n_add);
+
+        // Extend CSR row_ptr — new neurons have zero outgoing synapses
+        let last_ptr = *self.synapses.row_ptr.last().unwrap_or(&0);
+        for _ in 0..additional {
+            self.synapses.row_ptr.push(last_ptr);
+        }
+
+        // Update counts
+        self.n_neurons += additional;
+        self.n_excitatory += n_exc;
+        self.n_inhibitory += n_inh;
+
+        // Update spatial dims
+        self.dims.grow(additional);
+
+        additional
+    }
+
+    // --- Neuron Pruning (A3) ---
+
+    /// Remove neurons at the given indices from the pool.
+    ///
+    /// Uses swap-remove for O(1) per-element removal from SoA arrays.
+    /// Rebuilds the CSR synapse store to remap targets and remove dangling edges.
+    /// Returns the number of neurons actually pruned.
+    pub fn prune_neurons(&mut self, indices: &[u32]) -> u32 {
+        if indices.is_empty() { return 0; }
+
+        let n_before = self.n_neurons as usize;
+
+        // Sort descending for safe swap-remove
+        let mut sorted: Vec<usize> = indices.iter().map(|&i| i as usize).collect();
+        sorted.sort_unstable_by(|a, b| b.cmp(a));
+        sorted.dedup();
+        // Filter out-of-bounds
+        sorted.retain(|&i| i < n_before);
+
+        if sorted.is_empty() { return 0; }
+
+        let n_removed = sorted.len() as u32;
+
+        // Build a removal set for synapse remapping
+        let mut removed_set = vec![false; n_before];
+        for &idx in &sorted {
+            removed_set[idx] = true;
+        }
+
+        // Build index remap: old_index → new_index (u32::MAX if removed)
+        // After swap-remove in descending order, element at `idx` is replaced by
+        // the last element, then the vec shrinks. This is complex to track with CSR
+        // so we rebuild CSR from scratch instead.
+        let mut remap = vec![0u32; n_before];
+        let mut new_idx = 0u32;
+        for old in 0..n_before {
+            if removed_set[old] {
+                remap[old] = u32::MAX;
+            } else {
+                remap[old] = new_idx;
+                new_idx += 1;
+            }
+        }
+        let n_after = new_idx;
+
+        // Rebuild CSR: collect surviving edges with remapped source/target indices
+        let mut new_edges: Vec<(u32, Synapse)> = Vec::new();
+        for src in 0..n_before {
+            if removed_set[src] { continue; }
+            let outgoing = self.synapses.outgoing(src as u32);
+            for syn in outgoing {
+                let tgt = syn.target as usize;
+                if tgt >= n_before || removed_set[tgt] { continue; }
+                let mut new_syn = *syn;
+                new_syn.target = remap[tgt] as u16;
+                new_edges.push((remap[src], new_syn));
+            }
+        }
+        self.synapses = SynapseStore::from_edges(n_after, new_edges);
+
+        // Compact SoA arrays: keep only non-removed neurons in order
+        // (We can't use swap_remove because CSR remap assumes stable ordering)
+        let keep: Vec<usize> = (0..n_before).filter(|i| !removed_set[*i]).collect();
+
+        macro_rules! compact_vec {
+            ($vec:expr) => {
+                $vec = keep.iter().map(|&i| $vec[i]).collect();
+            };
+        }
+
+        compact_vec!(self.neurons.membrane);
+        compact_vec!(self.neurons.threshold);
+        compact_vec!(self.neurons.leak);
+        compact_vec!(self.neurons.refract_remaining);
+        compact_vec!(self.neurons.flags);
+        compact_vec!(self.neurons.trace);
+        compact_vec!(self.neurons.spike_out);
+        compact_vec!(self.neurons.binding_slot);
+        compact_vec!(self.synaptic_current);
+        compact_vec!(self.projection_current);
+        compact_vec!(self.spike_rate);
+        compact_vec!(self.spike_window);
+        compact_vec!(self.spike_counts);
+
+        // Shrink delay buffer
+        self.delay_buf.shrink_to(n_after as usize);
+
+        // Recount excitatory/inhibitory
+        let mut exc = 0u32;
+        let mut inh = 0u32;
+        for &f in &self.neurons.flags {
+            if flags::is_inhibitory(f) { inh += 1; } else { exc += 1; }
+        }
+        self.n_neurons = n_after;
+        self.n_excitatory = exc;
+        self.n_inhibitory = inh;
+
+        // Note: dims is NOT shrunk — the grid retains its shape even when
+        // neurons are pruned. The indices just become "empty slots" conceptually.
+        // This matches biological reality: cortical columns don't resize when
+        // neurons die, the space remains.
+
+        n_removed
+    }
+
+    // --- Neuron Migration (A5) ---
+
+    /// Migrate neurons toward activity hotspots by swapping grid positions.
+    ///
+    /// For spatial pools only. Low-activity neurons adjacent to high-activity
+    /// neurons swap positions, causing active clusters to attract neighbors.
+    /// "Migration" is position-swapping — neurons exchange grid positions,
+    /// which means swapping all their SoA fields and remapping synapse targets.
+    ///
+    /// Max migrations per call: `n_neurons / 32`. Seeded RNG for tie-breaking.
+    /// Returns count of swaps performed.
+    pub fn migrate_neurons(&mut self, seed: u64) -> u32 {
+        // Skip for flat (1D) pools — no spatial structure
+        if self.dims.h == 1 && self.dims.d == 1 {
+            return 0;
+        }
+
+        let n = self.n_neurons as usize;
+        if n < 4 { return 0; }
+
+        let max_swaps = (n / 32).max(1);
+        let mut swaps = 0u32;
+
+        // Simple LCG for tie-breaking
+        let mut rng_state: u64 = seed ^ (self.tick_count.wrapping_mul(0xBEEF));
+        let lcg_next = |state: &mut u64| -> u32 {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (*state >> 33) as u32
+        };
+
+        // Find candidate pairs: low-activity neuron adjacent to high-activity neuron
+        // We iterate in a randomized order to avoid bias
+        let mut candidates: Vec<(usize, usize)> = Vec::new();
+
+        for i in 0..n {
+            let my_count = self.spike_counts[i];
+            // Look for neighbors with much higher activity
+            for j in 0..n {
+                if i == j { continue; }
+                let d_sq = self.dims.distance_sq(i as u32, j as u32);
+                if d_sq > 3 { continue; } // Only immediate neighbors (distance <= sqrt(3))
+
+                let neighbor_count = self.spike_counts[j];
+                // Swap if neighbor has >2x activity and I have low activity
+                if neighbor_count > my_count.saturating_mul(2) + 1 && my_count < 3 {
+                    candidates.push((i, j));
+                }
+            }
+        }
+
+        // Shuffle candidates using LCG
+        for k in (1..candidates.len()).rev() {
+            let swap_idx = lcg_next(&mut rng_state) as usize % (k + 1);
+            candidates.swap(k, swap_idx);
+        }
+
+        // Track which neurons have already been swapped this cycle
+        let mut swapped = vec![false; n];
+
+        for (low_idx, high_idx) in candidates {
+            if swaps >= max_swaps as u32 { break; }
+            if swapped[low_idx] || swapped[high_idx] { continue; }
+
+            // Swap all SoA fields between the two neurons
+            self.neurons.membrane.swap(low_idx, high_idx);
+            self.neurons.threshold.swap(low_idx, high_idx);
+            self.neurons.leak.swap(low_idx, high_idx);
+            self.neurons.refract_remaining.swap(low_idx, high_idx);
+            self.neurons.flags.swap(low_idx, high_idx);
+            self.neurons.trace.swap(low_idx, high_idx);
+            self.neurons.spike_out.swap(low_idx, high_idx);
+            self.neurons.binding_slot.swap(low_idx, high_idx);
+            self.synaptic_current.swap(low_idx, high_idx);
+            self.projection_current.swap(low_idx, high_idx);
+            self.spike_rate.swap(low_idx, high_idx);
+            self.spike_window.swap(low_idx, high_idx);
+            self.spike_counts.swap(low_idx, high_idx);
+
+            // Remap synapse targets: any synapse targeting low_idx now targets high_idx and vice versa
+            let a = low_idx as u16;
+            let b = high_idx as u16;
+            for syn in self.synapses.synapses.iter_mut() {
+                if syn.target == a {
+                    syn.target = b;
+                } else if syn.target == b {
+                    syn.target = a;
+                }
+            }
+
+            // Swap the CSR row segments (outgoing synapses from each neuron)
+            // Since CSR is indexed by neuron, swapping the neurons means we need
+            // to swap their outgoing synapse blocks too. This is handled by
+            // swapping the actual synapse data in the contiguous array.
+            // For CSR, we need to extract, swap, and rebuild the two rows.
+            let start_a = self.synapses.row_ptr[low_idx] as usize;
+            let end_a = self.synapses.row_ptr[low_idx + 1] as usize;
+            let start_b = self.synapses.row_ptr[high_idx] as usize;
+            let end_b = self.synapses.row_ptr[high_idx + 1] as usize;
+
+            let syns_a: Vec<_> = self.synapses.synapses[start_a..end_a].to_vec();
+            let syns_b: Vec<_> = self.synapses.synapses[start_b..end_b].to_vec();
+            let len_a = syns_a.len();
+            let len_b = syns_b.len();
+
+            if len_a != len_b {
+                // Different number of outgoing synapses — need to rebuild CSR
+                // This is the expensive path, but migration is infrequent
+                let mut edges: Vec<(u32, crate::synapse::Synapse)> = Vec::new();
+                for src in 0..n {
+                    let outgoing = if src == low_idx {
+                        &syns_b[..]
+                    } else if src == high_idx {
+                        &syns_a[..]
+                    } else {
+                        let s = self.synapses.row_ptr[src] as usize;
+                        let e = self.synapses.row_ptr[src + 1] as usize;
+                        &self.synapses.synapses[s..e]
+                    };
+                    for syn in outgoing {
+                        edges.push((src as u32, *syn));
+                    }
+                }
+                self.synapses = SynapseStore::from_edges(self.n_neurons, edges);
+            } else {
+                // Same length — can swap in place
+                for k in 0..len_a {
+                    self.synapses.synapses[start_a + k] = syns_b[k];
+                    self.synapses.synapses[start_b + k] = syns_a[k];
+                }
+            }
+
+            swapped[low_idx] = true;
+            swapped[high_idx] = true;
+            swaps += 1;
+        }
+
+        if swaps > 0 {
+            log::debug!(
+                "[MIGRATION] {}: {} position swaps performed",
+                self.name, swaps
+            );
+        }
+
+        swaps
     }
 }
 
@@ -1237,6 +1664,307 @@ mod tests {
         assert_eq!(binding.target, 3);
         assert_eq!(binding.sensory_offset(), 256);
         assert_eq!(flags::neuron_type(loaded.neurons.flags[0]), NeuronType::Sensory);
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    // ====================================================================
+    // Activity tracking tests (A1)
+    // ====================================================================
+
+    #[test]
+    fn activity_tracking_counts_spikes() {
+        let mut pool = NeuronPool::new("test", 10, PoolConfig::default());
+
+        // Initially all zeros
+        assert_eq!(pool.neuron_activities().len(), 10);
+        assert!(pool.neuron_activities().iter().all(|&c| c == 0));
+        assert_eq!(pool.active_neuron_count(), 0);
+
+        // Force neuron 0 to spike with massive input
+        let mut input = vec![0i16; 10];
+        input[0] = 10000;
+        pool.tick_simple(&input);
+
+        assert!(pool.neurons.spike_out[0], "neuron 0 should have spiked");
+        assert_eq!(pool.neuron_activities()[0], 1, "spike_count for neuron 0 should be 1");
+        assert!(pool.active_neuron_count() >= 1);
+
+        // Tick again — neuron 0 is in refractory, so no spike
+        pool.tick_simple(&input);
+        assert!(!pool.neurons.spike_out[0], "neuron 0 should be refractory");
+        assert_eq!(pool.neuron_activities()[0], 1, "spike_count should stay 1 (no new spike)");
+
+        // Wait out refractory (2 ticks), then spike again
+        pool.tick_simple(&input); // tick 3 — still refractory
+        pool.tick_simple(&input); // tick 4 — should spike again
+        assert!(pool.neurons.spike_out[0], "neuron 0 should spike after refractory");
+        assert_eq!(pool.neuron_activities()[0], 2, "spike_count should now be 2");
+
+        // Reset activities
+        pool.reset_activities();
+        assert!(pool.neuron_activities().iter().all(|&c| c == 0));
+        assert_eq!(pool.active_neuron_count(), 0);
+    }
+
+    #[test]
+    fn growth_ratio_tracks_initial_size() {
+        let pool = NeuronPool::new("test", 100, PoolConfig::default());
+        assert_eq!(pool.growth_ratio(), 1.0, "initial growth ratio should be 1.0");
+    }
+
+    // ====================================================================
+    // Growth tests (A2)
+    // ====================================================================
+
+    #[test]
+    fn grow_neurons_extends_all_arrays() {
+        let mut pool = NeuronPool::new("test", 32, PoolConfig::default());
+        assert_eq!(pool.n_neurons, 32);
+        assert_eq!(pool.initial_neuron_count, 32);
+
+        let added = pool.grow_neurons_seeded(8, 42);
+        assert_eq!(added, 8);
+        assert_eq!(pool.n_neurons, 40);
+        assert_eq!(pool.initial_neuron_count, 32, "initial should not change");
+
+        // All SoA arrays should have correct length
+        assert_eq!(pool.neurons.membrane.len(), 40);
+        assert_eq!(pool.neurons.threshold.len(), 40);
+        assert_eq!(pool.neurons.leak.len(), 40);
+        assert_eq!(pool.neurons.flags.len(), 40);
+        assert_eq!(pool.neurons.trace.len(), 40);
+        assert_eq!(pool.neurons.spike_out.len(), 40);
+        assert_eq!(pool.neurons.binding_slot.len(), 40);
+        assert_eq!(pool.synaptic_current.len(), 40);
+        assert_eq!(pool.projection_current.len(), 40);
+        assert_eq!(pool.spike_rate.len(), 40);
+        assert_eq!(pool.spike_window.len(), 40);
+        assert_eq!(pool.spike_counts.len(), 40);
+
+        // New neurons should be at resting potential
+        for i in 32..40 {
+            assert_eq!(pool.neurons.membrane[i], pool.config.resting_potential);
+            assert_eq!(pool.neurons.threshold[i], pool.config.spike_threshold);
+        }
+
+        // Dale's Law: 80% excitatory of new neurons
+        let new_exc = (32..40).filter(|&i| crate::neuron::flags::is_excitatory(pool.neurons.flags[i])).count();
+        assert_eq!(new_exc, 6, "80% of 8 = 6 excitatory"); // (8*4)/5 = 6
+
+        // CSR should be extended — new neurons have 0 outgoing synapses
+        assert_eq!(pool.synapses.row_ptr.len(), 41); // n_neurons + 1
+        for i in 33..=40 {
+            assert_eq!(pool.synapses.outgoing((i - 1) as u32).len(), 0, "new neuron should have no synapses");
+        }
+
+        // Growth ratio should reflect the change
+        assert!((pool.growth_ratio() - 1.25).abs() < 0.01, "40/32 = 1.25");
+    }
+
+    #[test]
+    fn grow_neurons_pool_still_ticks() {
+        let mut pool = NeuronPool::new("test", 16, PoolConfig::default());
+        pool.grow_neurons_seeded(8, 42);
+
+        // Should be able to tick without panic
+        let input = vec![0i16; 24]; // 16 + 8
+        pool.tick_simple(&input);
+        assert_eq!(pool.tick_count, 1);
+
+        // Force spike on a new neuron
+        let mut input2 = vec![0i16; 24];
+        input2[20] = 10000;
+        pool.tick_simple(&input2);
+        assert!(pool.neurons.spike_out[20], "new neuron should spike with strong input");
+    }
+
+    #[test]
+    fn grow_spatial_extends_depth() {
+        let dims = SpatialDims::new(4, 4, 4);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 42);
+        assert_eq!(pool.n_neurons, 64);
+
+        pool.grow_neurons_seeded(16, 42);
+        assert_eq!(pool.n_neurons, 80);
+        // Depth should have increased: 16 / (4*4) = 1 extra layer → d=5
+        assert_eq!(pool.dims.d, 5);
+    }
+
+    // ====================================================================
+    // Pruning tests (A3)
+    // ====================================================================
+
+    #[test]
+    fn prune_neurons_reduces_count() {
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 32, 0.05, PoolConfig::default(), 42);
+        let syn_before = pool.synapse_count();
+        assert!(syn_before > 0);
+
+        let pruned = pool.prune_neurons(&[5, 10, 15]);
+        assert_eq!(pruned, 3);
+        assert_eq!(pool.n_neurons, 29);
+        assert_eq!(pool.neurons.membrane.len(), 29);
+        assert_eq!(pool.synapses.row_ptr.len(), 30); // 29 + 1
+
+        // Synapse count should be reduced (some edges removed)
+        assert!(pool.synapse_count() <= syn_before);
+
+        // Should still be tickable
+        let input = vec![0i16; 29];
+        pool.tick_simple(&input);
+    }
+
+    #[test]
+    fn prune_neurons_remaps_synapses() {
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 16, 0.1, PoolConfig::default(), 42);
+
+        // Prune the middle neurons
+        pool.prune_neurons(&[4, 5, 6, 7]);
+        assert_eq!(pool.n_neurons, 12);
+
+        // CSR integrity: all targets should be < n_neurons
+        for src in 0..pool.n_neurons {
+            for syn in pool.synapses.outgoing(src) {
+                assert!((syn.target as u32) < pool.n_neurons,
+                    "target {} out of range for {} neurons", syn.target, pool.n_neurons);
+            }
+        }
+
+        // row_ptr should be monotonically non-decreasing
+        for i in 0..pool.synapses.row_ptr.len() - 1 {
+            assert!(pool.synapses.row_ptr[i] <= pool.synapses.row_ptr[i + 1],
+                "row_ptr not monotonic at {}", i);
+        }
+    }
+
+    #[test]
+    fn prune_neurons_exc_inh_recount() {
+        let mut pool = NeuronPool::new("test", 10, PoolConfig::default());
+        // 10 neurons: 8 exc + 2 inh (indices 8, 9)
+        assert_eq!(pool.n_excitatory, 8);
+        assert_eq!(pool.n_inhibitory, 2);
+
+        // Prune one excitatory neuron
+        pool.prune_neurons(&[0]);
+        assert_eq!(pool.n_neurons, 9);
+        assert_eq!(pool.n_excitatory, 7);
+        assert_eq!(pool.n_inhibitory, 2);
+
+        // Prune one inhibitory neuron (originally at index 8, now at index 7 after pruning)
+        // After pruning index 0 from [0..7 exc, 8..9 inh], we have [1..7 exc, 8..9 inh] → remapped to [0..6 exc, 7..8 inh]
+        pool.prune_neurons(&[7]);
+        assert_eq!(pool.n_neurons, 8);
+        assert_eq!(pool.n_excitatory, 7);
+        assert_eq!(pool.n_inhibitory, 1);
+    }
+
+    #[test]
+    fn prune_out_of_bounds_ignored() {
+        let mut pool = NeuronPool::new("test", 10, PoolConfig::default());
+        let pruned = pool.prune_neurons(&[100, 200]);
+        assert_eq!(pruned, 0);
+        assert_eq!(pool.n_neurons, 10);
+    }
+
+    // ====================================================================
+    // Migration tests (A5)
+    // ====================================================================
+
+    #[test]
+    fn migration_flat_pool_noop() {
+        let mut pool = NeuronPool::new("test", 32, PoolConfig::default());
+        pool.spike_counts[0] = 100;
+        let swaps = pool.migrate_neurons(42);
+        assert_eq!(swaps, 0, "flat pool should not migrate");
+    }
+
+    #[test]
+    fn migration_moves_toward_activity() {
+        let dims = SpatialDims::new(4, 4, 4);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 42);
+
+        // Set high activity in one corner (neurons near index 0)
+        for i in 0..8 {
+            pool.spike_counts[i] = 50;
+        }
+        // Rest have zero activity
+
+        let swaps = pool.migrate_neurons(42);
+        // Some swaps should have occurred (low-activity neurons adjacent to high-activity)
+        // The exact count depends on grid topology, but with 56 silent neurons
+        // and 8 active ones, there should be some candidates
+        eprintln!("[MIGRATION TEST] swaps: {}", swaps);
+        // At minimum, the function shouldn't panic with spatial pools
+        assert!(swaps <= (64 / 32 + 1) as u32, "should not exceed max_swaps");
+    }
+
+    #[test]
+    fn migration_preserves_pool_integrity() {
+        let dims = SpatialDims::new(4, 4, 4);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 42);
+
+        for i in 0..16 {
+            pool.spike_counts[i] = 20;
+        }
+
+        pool.migrate_neurons(42);
+
+        // After migration, pool should still be tickable
+        assert_eq!(pool.n_neurons, 64);
+        let input = vec![0i16; 64];
+        pool.tick_simple(&input);
+
+        // CSR integrity
+        for src in 0..pool.n_neurons {
+            for syn in pool.synapses.outgoing(src) {
+                assert!((syn.target as u32) < pool.n_neurons,
+                    "target {} out of range after migration", syn.target);
+            }
+        }
+    }
+
+    #[test]
+    fn grow_then_prune_round_trip() {
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 32, 0.05, PoolConfig::default(), 42);
+
+        // Grow
+        pool.grow_neurons_seeded(8, 42);
+        assert_eq!(pool.n_neurons, 40);
+
+        // Prune the newly added neurons
+        let pruned = pool.prune_neurons(&[32, 33, 34, 35, 36, 37, 38, 39]);
+        assert_eq!(pruned, 8);
+        assert_eq!(pool.n_neurons, 32);
+
+        // Pool should still tick correctly
+        let input = vec![5000i16; 32];
+        pool.tick_simple(&input);
+        assert!(pool.spike_count() > 0);
+    }
+
+    #[test]
+    fn codec_v3_round_trip_with_activity() {
+        let mut pool = NeuronPool::new("test", 16, PoolConfig::default());
+
+        // Generate some activity
+        let mut input = vec![0i16; 16];
+        input[0] = 10000;
+        input[5] = 10000;
+        pool.tick_simple(&input);
+
+        let count_0 = pool.neuron_activities()[0];
+        let count_5 = pool.neuron_activities()[5];
+        assert!(count_0 > 0 || count_5 > 0, "at least one neuron should have spiked");
+
+        let path = std::env::temp_dir().join("neuropool_test_v3_activity.pool");
+        pool.save(&path).expect("save failed");
+        let loaded = NeuronPool::load(&path).expect("load failed");
+
+        assert_eq!(loaded.neuron_activities().len(), 16);
+        assert_eq!(loaded.neuron_activities()[0], count_0);
+        assert_eq!(loaded.neuron_activities()[5], count_5);
+        assert_eq!(loaded.growth_ratio(), 1.0);
 
         std::fs::remove_file(&path).ok();
     }

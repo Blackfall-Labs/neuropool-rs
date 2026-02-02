@@ -7,6 +7,17 @@
 use crate::pool::NeuronPool;
 use crate::synapse::{Synapse, ThermalState};
 
+/// Result of a growth cycle decision.
+#[derive(Clone, Debug, Default)]
+pub struct GrowthResult {
+    /// Number of neurons grown this cycle.
+    pub neurons_grown: u32,
+    /// Number of neurons pruned this cycle.
+    pub neurons_pruned: u32,
+    /// Pool size after the cycle.
+    pub new_size: u32,
+}
+
 impl NeuronPool {
     /// Apply neuromodulator-gated plasticity to all eligible synapses.
     ///
@@ -199,11 +210,91 @@ impl NeuronPool {
         }
         pruned
     }
+
+    /// Chemical-gated growth cycle — decides whether to grow or prune neurons.
+    ///
+    /// Growth signal is computed from DA, ACh, and NE above baseline (128).
+    /// Prune signal is computed from cortisol above baseline + silence ratio.
+    /// Dead neurons (zero spikes since last reset) are pruned first.
+    ///
+    /// Resets spike_counts after making the decision.
+    pub fn growth_cycle(&mut self, da: u8, ach: u8, ne: u8, cortisol: u8, seed: u64) -> GrowthResult {
+        // Copy config values to avoid borrow-checker conflict with &mut self calls
+        let max_neurons = self.config.growth.max_neurons;
+        let min_neurons = self.config.growth.min_neurons;
+        let growth_per_cycle = self.config.growth.growth_per_cycle;
+        let prune_per_cycle = self.config.growth.prune_per_cycle;
+        let growth_threshold = self.config.growth.growth_threshold;
+        let prune_threshold = self.config.growth.prune_threshold;
+
+        // Compute growth signal from excitatory modulators above baseline
+        let growth_signal = (da.saturating_sub(128) as u16)
+            + (ach.saturating_sub(128) as u16)
+            + (ne.saturating_sub(128) as u16);
+
+        // Compute prune signal from cortisol + silence ratio
+        let silence_ratio = if self.n_neurons > 0 {
+            let silent = self.n_neurons - self.active_neuron_count();
+            (silent * 100 / self.n_neurons) as u16
+        } else {
+            0
+        };
+        let prune_signal = (cortisol.saturating_sub(128) as u16) + silence_ratio;
+
+        let mut result = GrowthResult::default();
+
+        // Prune if signal exceeds threshold and above minimum
+        if prune_signal > prune_threshold && self.n_neurons > min_neurons {
+            // Identify dead neurons (zero spikes)
+            let mut dead: Vec<u32> = self.spike_counts.iter()
+                .enumerate()
+                .filter(|(_, &c)| c == 0)
+                .map(|(i, _)| i as u32)
+                .collect();
+
+            // Limit to prune_per_cycle
+            dead.truncate(prune_per_cycle as usize);
+
+            // Don't prune below minimum
+            let max_prunable = self.n_neurons.saturating_sub(min_neurons);
+            dead.truncate(max_prunable as usize);
+
+            if !dead.is_empty() {
+                result.neurons_pruned = self.prune_neurons(&dead);
+            }
+        }
+
+        // Grow if signal exceeds threshold and below maximum
+        if growth_signal > growth_threshold && self.n_neurons < max_neurons {
+            let headroom = max_neurons.saturating_sub(self.n_neurons);
+            let to_grow = (growth_per_cycle as u32).min(headroom);
+
+            if to_grow > 0 {
+                result.neurons_grown = self.grow_neurons_seeded(to_grow, seed);
+            }
+        }
+
+        result.new_size = self.n_neurons;
+
+        // Reset activity counters for next observation window
+        self.reset_activities();
+
+        if result.neurons_grown > 0 || result.neurons_pruned > 0 {
+            log::info!(
+                "[GROWTH] {}: +{} grown, -{} pruned → {} neurons (growth_sig={}, prune_sig={})",
+                self.name, result.neurons_grown, result.neurons_pruned,
+                result.new_size, growth_signal, prune_signal
+            );
+        }
+
+        result
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pool::PoolConfig;
 
     #[test]
     fn modulation_no_effect_at_baseline() {
@@ -296,6 +387,87 @@ mod tests {
         // Low ACh = no synaptogenesis
         let created = pool.synaptogenesis(100);
         assert_eq!(created, 0, "Low ACh should block synaptogenesis");
+    }
+
+    // ====================================================================
+    // Growth cycle tests (A4)
+    // ====================================================================
+
+    #[test]
+    fn growth_cycle_respects_bounds() {
+        use crate::pool::GrowthConfig;
+
+        let mut config = PoolConfig::default();
+        config.growth = GrowthConfig {
+            max_neurons: 40,
+            min_neurons: 8,
+            growth_per_cycle: 4,
+            prune_per_cycle: 4,
+            growth_threshold: 10,
+            prune_threshold: 10,
+        };
+        let mut pool = NeuronPool::new("test", 32, config);
+
+        // Mark all neurons as active so pruning doesn't fire
+        pool.spike_counts.fill(5);
+
+        // High DA/ACh/NE should trigger growth
+        let result = pool.growth_cycle(200, 200, 200, 128, 42);
+        assert_eq!(result.neurons_grown, 4, "should grow 4 (growth_per_cycle)");
+        assert_eq!(result.neurons_pruned, 0, "all active, no prune");
+        assert_eq!(result.new_size, 36);
+
+        // growth_cycle resets activities, so re-mark as active
+        pool.spike_counts.fill(5);
+
+        // Grow again — should hit ceiling at 40
+        let result2 = pool.growth_cycle(200, 200, 200, 128, 43);
+        assert_eq!(result2.neurons_grown, 4, "should grow exactly to cap");
+        assert_eq!(result2.new_size, 40);
+
+        pool.spike_counts.fill(5);
+
+        // One more — already at cap
+        let result3 = pool.growth_cycle(200, 200, 200, 128, 44);
+        assert_eq!(result3.neurons_grown, 0, "at cap, no growth");
+    }
+
+    #[test]
+    fn growth_cycle_chemical_gated() {
+        let mut pool = NeuronPool::new("test", 32, PoolConfig::default());
+
+        // Baseline chemicals — no growth, no pruning
+        let result = pool.growth_cycle(128, 128, 128, 128, 42);
+        assert_eq!(result.neurons_grown, 0);
+        assert_eq!(result.neurons_pruned, 0);
+        assert_eq!(result.new_size, 32);
+    }
+
+    #[test]
+    fn growth_cycle_prunes_dead_neurons() {
+        use crate::pool::GrowthConfig;
+
+        let mut config = PoolConfig::default();
+        config.growth = GrowthConfig {
+            max_neurons: 200,
+            min_neurons: 4,
+            growth_per_cycle: 4,
+            prune_per_cycle: 8,
+            growth_threshold: 30,
+            prune_threshold: 10,
+        };
+        let mut pool = NeuronPool::new("test", 32, config);
+
+        // Simulate: only neurons 0..8 are active, rest are dead
+        for i in 0..8 {
+            pool.spike_counts[i] = 10;
+        }
+        // Neurons 8..32 have 0 spikes — all dead
+
+        // High cortisol + many silent neurons should trigger pruning
+        let result = pool.growth_cycle(128, 128, 128, 200, 42);
+        assert!(result.neurons_pruned > 0, "should prune dead neurons: got {}", result.neurons_pruned);
+        assert!(result.new_size < 32);
     }
 
     #[test]

@@ -211,6 +211,55 @@ impl NeuronArrays {
     pub fn is_empty(&self) -> bool {
         self.membrane.is_empty()
     }
+
+    /// Extend all SoA arrays with `additional` neurons at resting state.
+    ///
+    /// New neurons follow Dale's Law: first `n_new_excitatory` are excitatory,
+    /// remaining are inhibitory. All start at resting potential with zero trace
+    /// and no binding.
+    pub fn extend(&mut self, additional: u32, n_new_excitatory: u32, resting: i16, threshold: i16) {
+        let n = additional as usize;
+        let n_exc = n_new_excitatory as usize;
+
+        for i in 0..n {
+            let inhibitory = i >= n_exc;
+            let profile = if inhibitory {
+                NeuronProfile::FastSpiking
+            } else {
+                NeuronProfile::RegularSpiking
+            };
+            let f = flags::encode(inhibitory, profile);
+            self.membrane.push(resting);
+            self.threshold.push(threshold);
+            self.leak.push(NeuronProfile::from_flags(f).default_leak());
+            self.refract_remaining.push(0);
+            self.flags.push(f);
+            self.trace.push(0);
+            self.spike_out.push(false);
+            self.binding_slot.push(0);
+        }
+    }
+
+    /// Remove neurons at the given sorted-descending indices from all SoA arrays.
+    ///
+    /// `indices` MUST be sorted in descending order for correct swap-remove behavior.
+    /// Returns the number of neurons actually removed.
+    pub fn remove_descending(&mut self, indices: &[usize]) -> usize {
+        let mut removed = 0;
+        for &idx in indices {
+            if idx >= self.membrane.len() { continue; }
+            self.membrane.swap_remove(idx);
+            self.threshold.swap_remove(idx);
+            self.leak.swap_remove(idx);
+            self.refract_remaining.swap_remove(idx);
+            self.flags.swap_remove(idx);
+            self.trace.swap_remove(idx);
+            self.spike_out.swap_remove(idx);
+            self.binding_slot.swap_remove(idx);
+            removed += 1;
+        }
+        removed
+    }
 }
 
 #[cfg(test)]

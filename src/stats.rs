@@ -58,6 +58,15 @@ pub struct PoolStats {
     pub types: TypeDistribution,
     pub mean_weight_magnitude: f32,
     pub mean_eligibility_magnitude: f32,
+    // --- Growth engine fields (A6) ---
+    /// Initial neuron count at construction (genome baseline).
+    pub initial_neuron_count: u32,
+    /// Current / initial neuron count ratio.
+    pub growth_ratio: f32,
+    /// Ratio of neurons that spiked at least once since last reset.
+    pub active_ratio: f32,
+    /// Average synapses per neuron.
+    pub synapses_per_neuron: f32,
 }
 
 impl std::fmt::Display for PoolStats {
@@ -69,6 +78,9 @@ impl std::fmt::Display for PoolStats {
         writeln!(f, "  Thermal: {}", self.thermal)?;
         writeln!(f, "  Mean |weight|: {:.1}, Mean |eligibility|: {:.1}",
             self.mean_weight_magnitude, self.mean_eligibility_magnitude)?;
+        writeln!(f, "  Growth: {:.2}x (initial={}), Active: {:.1}%, Syn/neuron: {:.1}",
+            self.growth_ratio, self.initial_neuron_count,
+            self.active_ratio * 100.0, self.synapses_per_neuron)?;
         Ok(())
     }
 }
@@ -125,6 +137,17 @@ impl NeuronPool {
         let mean_weight = if n_syn > 0 { weight_sum as f32 / n_syn as f32 } else { 0.0 };
         let mean_elig = if n_syn > 0 { elig_sum as f32 / n_syn as f32 } else { 0.0 };
 
+        let active_ratio = if self.n_neurons > 0 {
+            self.active_neuron_count() as f32 / self.n_neurons as f32
+        } else {
+            0.0
+        };
+        let synapses_per_neuron = if self.n_neurons > 0 {
+            n_syn as f32 / self.n_neurons as f32
+        } else {
+            0.0
+        };
+
         PoolStats {
             name: self.name.clone(),
             dims: self.dims,
@@ -138,6 +161,10 @@ impl NeuronPool {
             types,
             mean_weight_magnitude: mean_weight,
             mean_eligibility_magnitude: mean_elig,
+            initial_neuron_count: self.initial_neuron_count,
+            growth_ratio: self.growth_ratio(),
+            active_ratio,
+            synapses_per_neuron,
         }
     }
 }
@@ -154,6 +181,29 @@ mod tests {
         assert_eq!(stats.n_neurons, 100);
         assert_eq!(stats.n_synapses, 0);
         assert_eq!(stats.thermal.total(), 0);
+    }
+
+    #[test]
+    fn stats_reports_growth_fields() {
+        let mut pool = NeuronPool::new("test", 32, PoolConfig::default());
+
+        // Generate some activity
+        let mut input = vec![0i16; 32];
+        input[0] = 10000;
+        input[1] = 10000;
+        pool.tick_simple(&input);
+
+        let stats = pool.stats();
+        assert_eq!(stats.initial_neuron_count, 32);
+        assert_eq!(stats.growth_ratio, 1.0);
+        assert!(stats.active_ratio > 0.0, "some neurons should be active");
+        assert_eq!(stats.synapses_per_neuron, 0.0, "no connectivity = 0 syn/neuron");
+
+        // Grow and check ratio changes
+        pool.grow_neurons_seeded(32, 42);
+        let stats2 = pool.stats();
+        assert_eq!(stats2.initial_neuron_count, 32);
+        assert!((stats2.growth_ratio - 2.0).abs() < 0.01, "64/32 = 2.0");
     }
 
     #[test]
