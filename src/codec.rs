@@ -318,6 +318,7 @@ impl NeuronPool {
             synaptic_current: vec![0i16; delay_buf_n],
             last_spike_count: 0,
             spike_rate: vec![0u16; delay_buf_n],
+            spike_window: vec![false; delay_buf_n],
             config,
         })
     }

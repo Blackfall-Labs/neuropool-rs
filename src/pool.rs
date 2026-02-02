@@ -126,6 +126,12 @@ pub struct NeuronPool {
     pub(crate) last_spike_count: u32,
     /// Homeostatic spike rate tracker: running average per neuron (Q8.8)
     pub(crate) spike_rate: Vec<u16>,
+    /// Spike window accumulator — tracks which neurons spiked at ANY point
+    /// since the last `inject()` call. This allows `read_output()` to report
+    /// activity from the entire tick sequence, not just the final tick.
+    /// Biological basis: a neuron that fired during a processing window is
+    /// "active" even if currently in refractory period.
+    pub(crate) spike_window: Vec<bool>,
 }
 
 impl NeuronPool {
@@ -158,6 +164,7 @@ impl NeuronPool {
             synaptic_current: vec![0i16; n_neurons as usize],
             last_spike_count: 0,
             spike_rate: vec![0u16; n_neurons as usize],
+            spike_window: vec![false; n_neurons as usize],
         }
     }
 
@@ -259,6 +266,7 @@ impl NeuronPool {
             // 2e. Spike check
             if self.neurons.membrane[i] >= self.neurons.threshold[i] {
                 self.neurons.spike_out[i] = true;
+                self.spike_window[i] = true; // Accumulate into measurement window
                 self.neurons.membrane[i] = self.config.reset_potential;
                 self.neurons.refract_remaining[i] = self.config.refractory_ticks;
 
@@ -343,6 +351,9 @@ impl NeuronPool {
         let start = neuron_range.start as usize;
         let end = (neuron_range.end as usize).min(self.n_neurons as usize);
 
+        // Clear spike window — new measurement window begins with each injection
+        self.spike_window.fill(false);
+
         for i in start..end {
             self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(current);
         }
@@ -350,16 +361,20 @@ impl NeuronPool {
 
     /// Read output from a range of neurons as Signal vector.
     ///
-    /// Neurons that spiked this tick produce a positive Signal with magnitude
-    /// proportional to their suprathreshold membrane potential before reset.
+    /// Reports any neuron that spiked at ANY point during the current
+    /// measurement window (since the last `inject()` call). This captures
+    /// activity from the entire tick sequence, not just the final tick.
+    ///
+    /// Biological basis: a neuron that fired during a processing window
+    /// is "active" regardless of current refractory state.
     pub fn read_output(&self, neuron_range: Range<u32>) -> Vec<Signal> {
         let start = neuron_range.start as usize;
         let end = (neuron_range.end as usize).min(self.n_neurons as usize);
 
         (start..end)
             .map(|i| {
-                if self.neurons.spike_out[i] {
-                    Signal::positive(255) // Binary spike — full magnitude
+                if self.spike_window[i] {
+                    Signal::positive(255) // Fired during this window
                 } else {
                     Signal::zero()
                 }
@@ -482,5 +497,46 @@ mod tests {
         // At least some of the injected neurons should have spiked
         let spiked: usize = output.iter().filter(|s| s.is_positive()).count();
         assert!(spiked > 0, "injected neurons should produce output spikes");
+    }
+
+    #[test]
+    fn propagation_diagnostic_256n() {
+        // Simulates the regulation shared pool: 256 neurons, 5% density,
+        // inject into 0..32, read from 57..64 after 10 ticks.
+        let mut pool = NeuronPool::with_random_connectivity_seeded(
+            "regulation", 256, 0.05, PoolConfig::default(), 0xDEAD_BEEF,
+        );
+        eprintln!("Pool: {} neurons, {} synapses", pool.n_neurons, pool.synapse_count());
+
+        // Inject strong signal (magnitude 40 → current 5120 > threshold gap 3840)
+        pool.inject(0..32, Signal::positive(40));
+
+        for t in 0..10 {
+            pool.tick(&[]);
+            let spikes = pool.spike_count();
+            let out = pool.read_output(57..64);
+            let out_fired: usize = out.iter().filter(|s| s.is_positive()).count();
+            eprintln!("  tick {}: spikes={} output_57_63_fired={}", t, spikes, out_fired);
+        }
+
+        let output = pool.read_output(57..64);
+        let fired: usize = output.iter().filter(|s| s.is_positive()).count();
+        eprintln!("Final output 57-63: {:?} ({} fired)",
+            output.iter().map(|s| s.as_signed_i32()).collect::<Vec<_>>(), fired);
+
+        // Second injection (simulating program 2 injecting into same range)
+        pool.inject(0..32, Signal::positive(40));
+        for t in 0..10 {
+            pool.tick(&[]);
+            let spikes = pool.spike_count();
+            let out = pool.read_output(57..64);
+            let out_fired: usize = out.iter().filter(|s| s.is_positive()).count();
+            eprintln!("  pass2 tick {}: spikes={} output_57_63_fired={}", t, spikes, out_fired);
+        }
+
+        let output2 = pool.read_output(57..64);
+        let fired2: usize = output2.iter().filter(|s| s.is_positive()).count();
+        eprintln!("Pass2 output 57-63: {:?} ({} fired)",
+            output2.iter().map(|s| s.as_signed_i32()).collect::<Vec<_>>(), fired2);
     }
 }
