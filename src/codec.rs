@@ -143,6 +143,7 @@ fn deserialize_config(r: &mut &[u8]) -> io::Result<PoolConfig> {
         stdp_negative: read_i8(r)?,
         max_delay: read_u8(r)?,
         growth: crate::pool::GrowthConfig::default(),
+        evolution: crate::pool::EvolutionConfig::default(),
     })
 }
 
@@ -402,6 +403,8 @@ impl NeuronPool {
             spike_counts,
             initial_neuron_count,
             chem_exposure: vec![0u8; delay_buf_n],
+            generation: 0,
+            journal: crate::pool::MutationJournal::new(16),
             config,
         })
     }

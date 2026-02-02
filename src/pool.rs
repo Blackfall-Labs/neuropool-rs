@@ -185,6 +185,156 @@ impl Default for TypeDistributionSpec {
     }
 }
 
+/// Input signals for computing region fitness during evolution.
+///
+/// These are collected by the brain runtime (astromind-v3) and passed down
+/// to the pool's evolution engine. The pool doesn't know where the signals
+/// come from — it just scores them.
+#[derive(Clone, Copy, Debug)]
+pub struct FitnessInput {
+    /// Singular coherence for this region's division (0-255).
+    pub coherence: u8,
+    /// Dopamine level (0-255, baseline ~128).
+    pub da: u8,
+    /// Cortisol level (0-255, baseline ~30).
+    pub cortisol: u8,
+    /// Fraction of neurons that spiked in recent window (0.0 - 1.0).
+    pub active_ratio: f32,
+    /// Fraction of max possible synapses that exist (0.0 - 1.0).
+    pub synapse_density: f32,
+}
+
+/// Type of structural mutation applied during evolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationType {
+    NeuronGrow,
+    NeuronPrune,
+    SynapsePrune,
+    SynapseRegrow,
+    TypeRebalance,
+    WeightPerturbation,
+}
+
+/// A single mutation event recorded in the journal.
+#[derive(Clone, Copy, Debug)]
+pub struct MutationEntry {
+    pub generation: u32,
+    pub mutation_type: MutationType,
+    /// Signed magnitude — positive = added, negative = removed.
+    pub magnitude: i16,
+    pub fitness_before: u8,
+    pub fitness_after: u8,
+}
+
+/// Ring buffer of recent mutation events. Keeps the last N entries.
+#[derive(Clone, Debug)]
+pub struct MutationJournal {
+    entries: Vec<MutationEntry>,
+    max_entries: usize,
+}
+
+impl MutationJournal {
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::with_capacity(max_entries),
+            max_entries,
+        }
+    }
+
+    /// Record a mutation. Drops oldest entry if full.
+    pub fn record(&mut self, entry: MutationEntry) {
+        if self.entries.len() >= self.max_entries {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+
+    /// All recorded entries, oldest first.
+    pub fn entries(&self) -> &[MutationEntry] {
+        &self.entries
+    }
+
+    /// Number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether journal is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Average fitness delta across recent entries. Positive = improving.
+    pub fn avg_fitness_delta(&self) -> i16 {
+        if self.entries.is_empty() {
+            return 0;
+        }
+        let sum: i32 = self.entries.iter()
+            .map(|e| e.fitness_after as i32 - e.fitness_before as i32)
+            .sum();
+        (sum / self.entries.len() as i32) as i16
+    }
+}
+
+/// Evolution engine configuration — bounds and thresholds for structural mutation.
+#[derive(Clone, Debug)]
+pub struct EvolutionConfig {
+    /// Whether evolution is enabled. Default: true
+    pub enabled: bool,
+    /// Maximum mutations per evolution call. Default: 4
+    pub mutation_budget: u8,
+    /// Fitness above this → low mutation rate (elite). Default: 180
+    pub elite_threshold: u8,
+    /// Fitness below this → high mutation rate (struggling). Default: 80
+    pub struggle_threshold: u8,
+    /// Mutation probability /256 for elite regions. Default: 25 (~10%)
+    pub elite_mutation_prob: u8,
+    /// Mutation probability /256 for struggling regions. Default: 128 (~50%)
+    pub struggle_mutation_prob: u8,
+    /// Max weight delta per synapse during perturbation. Default: 10
+    pub weight_perturbation_max: i8,
+}
+
+impl Default for EvolutionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mutation_budget: 4,
+            elite_threshold: 180,
+            struggle_threshold: 80,
+            elite_mutation_prob: 25,
+            struggle_mutation_prob: 128,
+            weight_perturbation_max: 10,
+        }
+    }
+}
+
+/// Result of a single evolution call.
+#[derive(Clone, Copy, Debug)]
+pub struct EvolutionResult {
+    pub mutations_applied: u8,
+    pub fitness_before: u8,
+    pub fitness_after: u8,
+    pub generation: u32,
+}
+
+/// Lightweight structural snapshot for evolution rollback.
+///
+/// Captures only what evolution can change — neuron structure and synapse edges.
+/// Does NOT include membrane potentials, traces, or delay buffers (those reset
+/// on rollback since the pre-mutation dynamic state is meaningless).
+#[derive(Clone)]
+pub struct PoolCheckpoint {
+    pub generation: u32,
+    pub n_neurons: u32,
+    pub n_excitatory: u32,
+    pub n_inhibitory: u32,
+    pub flags: Vec<u8>,
+    pub thresholds: Vec<i16>,
+    pub leak: Vec<u8>,
+    pub edges: Vec<(u32, Synapse)>,
+}
+
 /// Pool configuration — all Q8.8 fixed-point where noted.
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
@@ -211,6 +361,8 @@ pub struct PoolConfig {
     pub max_delay: u8,
     /// Growth engine configuration. Default: derived from 256 neurons.
     pub growth: GrowthConfig,
+    /// Evolution engine configuration.
+    pub evolution: EvolutionConfig,
 }
 
 impl Default for PoolConfig {
@@ -227,6 +379,7 @@ impl Default for PoolConfig {
             stdp_negative: -10,
             max_delay: 8,
             growth: GrowthConfig::default(),
+            evolution: EvolutionConfig::default(),
         }
     }
 }
@@ -342,6 +495,10 @@ pub struct NeuronPool {
     /// chemical levels seen during growth_cycle. Used by type mutation to detect
     /// neurons consistently exposed to specific chemicals. 0 = no exposure.
     pub chem_exposure: Vec<u8>,
+    /// Evolution generation counter. Increments each time evolve_structure runs.
+    pub generation: u32,
+    /// Journal of recent structural mutations for tracking evolution history.
+    pub journal: MutationJournal,
 }
 
 impl NeuronPool {
@@ -381,6 +538,8 @@ impl NeuronPool {
             spike_counts: vec![0u32; n_neurons as usize],
             initial_neuron_count: n_neurons,
             chem_exposure: vec![0u8; n_neurons as usize],
+            generation: 0,
+            journal: MutationJournal::new(16),
         }
     }
 
@@ -1344,6 +1503,338 @@ impl NeuronPool {
 
         swaps
     }
+
+    /// Take a structural checkpoint for potential rollback.
+    ///
+    /// Captures neuron flags, thresholds, leak rates, and all synapse edges.
+    /// Cheap for small pools (hundreds of neurons), proportional to pool size.
+    pub fn checkpoint(&self) -> PoolCheckpoint {
+        let n = self.n_neurons as usize;
+        let mut edges = Vec::new();
+        for src in 0..self.n_neurons {
+            for syn in self.synapses.outgoing(src) {
+                edges.push((src, *syn));
+            }
+        }
+        PoolCheckpoint {
+            generation: self.generation,
+            n_neurons: self.n_neurons,
+            n_excitatory: self.n_excitatory,
+            n_inhibitory: self.n_inhibitory,
+            flags: self.neurons.flags[..n].to_vec(),
+            thresholds: self.neurons.threshold[..n].to_vec(),
+            leak: self.neurons.leak[..n].to_vec(),
+            edges,
+        }
+    }
+
+    /// Rollback structural state from a checkpoint.
+    ///
+    /// Restores neuron flags, thresholds, leak, and synapse edges.
+    /// Resets membrane, traces, and activity to resting state (clean slate).
+    pub fn rollback(&mut self, cp: &PoolCheckpoint) {
+        let n = cp.n_neurons as usize;
+        self.n_neurons = cp.n_neurons;
+        self.n_excitatory = cp.n_excitatory;
+        self.n_inhibitory = cp.n_inhibitory;
+        self.dims = SpatialDims::flat(cp.n_neurons);
+
+        // Resize arrays to checkpoint size
+        self.neurons.flags.resize(n, 0);
+        self.neurons.threshold.resize(n, self.config.spike_threshold);
+        self.neurons.leak.resize(n, 0u8);
+        self.neurons.membrane.resize(n, self.config.resting_potential);
+        self.neurons.refract_remaining.resize(n, 0);
+        self.neurons.trace.resize(n, 0);
+        self.spike_rate.resize(n, 0);
+        self.spike_window.resize(n, false);
+        self.spike_counts.resize(n, 0);
+        self.chem_exposure.resize(n, 0);
+        self.synaptic_current.resize(n, 0);
+        self.projection_current.resize(n, 0);
+
+        // Restore structural state
+        self.neurons.flags[..n].copy_from_slice(&cp.flags);
+        self.neurons.threshold[..n].copy_from_slice(&cp.thresholds);
+        self.neurons.leak[..n].copy_from_slice(&cp.leak);
+
+        // Reset dynamic state to resting
+        for i in 0..n {
+            self.neurons.membrane[i] = self.config.resting_potential;
+            self.neurons.refract_remaining[i] = 0;
+            self.neurons.trace[i] = 0;
+            self.spike_rate[i] = 0;
+            self.spike_window[i] = false;
+            self.spike_counts[i] = 0;
+            self.chem_exposure[i] = 0;
+        }
+
+        // Restore synapse edges
+        self.synapses = SynapseStore::from_edges(cp.n_neurons, cp.edges.clone());
+
+        // Rebuild delay buffer for new size
+        self.delay_buf = DelayBuffer::new(n, self.config.max_delay);
+
+        log::debug!(
+            "[ROLLBACK] {}: restored to gen {} ({} neurons, {} edges)",
+            self.name, cp.generation, cp.n_neurons, cp.edges.len()
+        );
+    }
+
+    /// Evolve the pool's structure based on fitness signals.
+    ///
+    /// Regions that perform well (high fitness) get conservative mutations.
+    /// Struggling regions (low fitness) get aggressive rewiring.
+    /// Mutations are bounded by `EvolutionConfig::mutation_budget`.
+    ///
+    /// Returns an `EvolutionResult` with before/after fitness and generation.
+    pub fn evolve_structure(&mut self, fitness: &FitnessInput, seed: u64) -> EvolutionResult {
+        let evo = &self.config.evolution.clone();
+        if !evo.enabled {
+            return EvolutionResult {
+                mutations_applied: 0,
+                fitness_before: self.compute_fitness(fitness),
+                fitness_after: self.compute_fitness(fitness),
+                generation: self.generation,
+            };
+        }
+
+        let fitness_before = self.compute_fitness(fitness);
+
+        // Determine mutation probability based on fitness tier
+        let mutation_prob = if fitness_before >= evo.elite_threshold {
+            evo.elite_mutation_prob
+        } else if fitness_before <= evo.struggle_threshold {
+            evo.struggle_mutation_prob
+        } else {
+            // Linear interpolation between struggle and elite
+            let range = evo.elite_threshold.saturating_sub(evo.struggle_threshold) as u16;
+            let pos = fitness_before.saturating_sub(evo.struggle_threshold) as u16;
+            let prob_range = evo.struggle_mutation_prob.saturating_sub(evo.elite_mutation_prob) as u16;
+            (evo.struggle_mutation_prob as u16 - (pos * prob_range / range.max(1))) as u8
+        };
+
+        // Simple LCG seeded PRNG
+        let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let lcg_next = |state: &mut u64| -> u32 {
+            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (*state >> 33) as u32
+        };
+
+        // Roll dice — skip if no mutation this cycle
+        let roll = (lcg_next(&mut rng) & 0xFF) as u8;
+        if roll >= mutation_prob {
+            self.generation += 1;
+            return EvolutionResult {
+                mutations_applied: 0,
+                fitness_before,
+                fitness_after: fitness_before,
+                generation: self.generation,
+            };
+        }
+
+        // Take checkpoint before mutations for potential rollback
+        let checkpoint = self.checkpoint();
+
+        // Select and apply mutations based on pool state
+        let mut mutations_applied = 0u8;
+        let budget = evo.mutation_budget;
+
+        for _ in 0..budget {
+            let mutation_roll = lcg_next(&mut rng) % 100;
+
+            // Weighted selection based on what the pool needs
+            let mutation_type = if fitness.active_ratio < 0.05 && mutation_roll < 40 {
+                // Nearly silent → grow neurons
+                MutationType::NeuronGrow
+            } else if fitness.active_ratio > 0.50 && fitness_before < evo.struggle_threshold && mutation_roll < 30 {
+                // Hyperactive + low fitness → prune dead neurons
+                MutationType::NeuronPrune
+            } else if fitness.synapse_density < 0.15 && mutation_roll < 40 {
+                // Very sparse → regrow synapses
+                MutationType::SynapseRegrow
+            } else if fitness.synapse_density > 0.70 && fitness_before < evo.struggle_threshold && mutation_roll < 30 {
+                // Dense but struggling → prune weak synapses
+                MutationType::SynapsePrune
+            } else if mutation_roll < 60 {
+                // Default mutation: weight perturbation (most conservative)
+                MutationType::WeightPerturbation
+            } else if mutation_roll < 80 {
+                MutationType::SynapseRegrow
+            } else {
+                MutationType::TypeRebalance
+            };
+
+            let magnitude = match mutation_type {
+                MutationType::NeuronGrow => {
+                    let to_grow = ((lcg_next(&mut rng) % 4) + 1).min(
+                        self.config.growth.max_neurons.saturating_sub(self.n_neurons)
+                    );
+                    if to_grow > 0 {
+                        let grown = self.grow_neurons_seeded(to_grow, lcg_next(&mut rng) as u64);
+                        grown as i16
+                    } else {
+                        0
+                    }
+                }
+                MutationType::NeuronPrune => {
+                    // Find dead neurons (zero spike count) and prune some
+                    let dead: Vec<u32> = (0..self.n_neurons)
+                        .filter(|&i| self.spike_counts[i as usize] == 0)
+                        .take(4)
+                        .collect();
+                    if !dead.is_empty() {
+                        let pruned = self.prune_neurons(&dead);
+                        -(pruned as i16)
+                    } else {
+                        0
+                    }
+                }
+                MutationType::SynapsePrune => {
+                    let pruned = self.prune_dead();
+                    -(pruned as i16)
+                }
+                MutationType::SynapseRegrow => {
+                    // Bypass ACh gate — evolve_structure forces synaptogenesis
+                    let created = self.synaptogenesis(255); // max ACh to bypass gate
+                    created as i16
+                }
+                MutationType::TypeRebalance => {
+                    // Use existing type_plasticity with elevated DA
+                    let mutations = self.type_plasticity(200, lcg_next(&mut rng) as u64);
+                    mutations as i16
+                }
+                MutationType::WeightPerturbation => {
+                    let max_delta = evo.weight_perturbation_max;
+                    let mut perturbed = 0i16;
+                    let n_synapses = self.synapses.synapses.len();
+                    // Perturb up to 16 random synapses
+                    let n_to_perturb = 16.min(n_synapses);
+                    for _ in 0..n_to_perturb {
+                        let idx = lcg_next(&mut rng) as usize % n_synapses.max(1);
+                        if idx < n_synapses {
+                            let syn = &mut self.synapses.synapses[idx];
+                            if syn.thermal_state() == crate::synapse::ThermalState::Cold {
+                                continue; // Don't perturb frozen synapses
+                            }
+                            let delta = ((lcg_next(&mut rng) % (2 * max_delta as u32 + 1)) as i8)
+                                .wrapping_sub(max_delta);
+                            let old = syn.weight as i16;
+                            let new_w = (old + delta as i16).clamp(-127, 127) as i8;
+                            syn.weight = new_w;
+                            perturbed += 1;
+                        }
+                    }
+                    perturbed
+                }
+            };
+
+            if magnitude != 0 {
+                mutations_applied += 1;
+                self.journal.record(MutationEntry {
+                    generation: self.generation,
+                    mutation_type,
+                    magnitude,
+                    fitness_before,
+                    fitness_after: 0, // filled in below
+                });
+            }
+        }
+
+        let fitness_after = self.compute_fitness(fitness);
+
+        // Rollback if significant regression (fitness dropped by more than 10)
+        if mutations_applied > 0 && fitness_before > fitness_after.saturating_add(10) {
+            self.rollback(&checkpoint);
+            self.generation += 1;
+
+            log::debug!(
+                "[EVOLVE] {}: gen {} ROLLBACK (fitness {} → {} regressed)",
+                self.name, self.generation, fitness_before, fitness_after
+            );
+
+            return EvolutionResult {
+                mutations_applied: 0,
+                fitness_before,
+                fitness_after: fitness_before, // restored
+                generation: self.generation,
+            };
+        }
+
+        // Update journal entries with actual fitness_after
+        for entry in self.journal.entries.iter_mut().rev().take(mutations_applied as usize) {
+            entry.fitness_after = fitness_after;
+        }
+
+        self.generation += 1;
+
+        log::debug!(
+            "[EVOLVE] {}: gen {} fitness {} → {} ({} mutations)",
+            self.name, self.generation, fitness_before, fitness_after, mutations_applied
+        );
+
+        EvolutionResult {
+            mutations_applied,
+            fitness_before,
+            fitness_after,
+            generation: self.generation,
+        }
+    }
+
+    /// Compute a fitness score (0-255) from external signals.
+    ///
+    /// Higher fitness = region is performing well. Formula components:
+    /// - **Coherence** (0-255): direct measure of useful computation
+    /// - **DA reward** (0-127): dopamine above baseline signals success
+    /// - **Cortisol penalty** (0-127): cortisol above baseline signals distress
+    /// - **Activity health** (0-64): penalizes both silent and saturated pools
+    /// - **Density health** (0-64): penalizes both too-sparse and too-dense wiring
+    pub fn compute_fitness(&self, input: &FitnessInput) -> u8 {
+        // Coherence: worth up to 128 points (half the score)
+        let coherence_score = (input.coherence as u16) / 2;
+
+        // DA reward: above baseline 128 → positive, below → 0
+        let da_reward = input.da.saturating_sub(128) as u16; // 0-127
+
+        // Cortisol penalty: above baseline 30 → negative
+        let cortisol_penalty = input.cortisol.saturating_sub(30) as u16; // 0-225
+
+        // Activity health: bell curve centered at 0.15-0.40 (healthy range)
+        let activity_health = if input.active_ratio < 0.05 {
+            // Nearly silent — unhealthy
+            (input.active_ratio * 20.0 * 64.0) as u16
+        } else if input.active_ratio <= 0.40 {
+            64 // Sweet spot
+        } else if input.active_ratio <= 0.80 {
+            // Increasingly saturated
+            ((1.0 - (input.active_ratio - 0.40) / 0.40) * 64.0) as u16
+        } else {
+            0 // Epileptic-level firing — very unhealthy
+        };
+
+        // Density health: bell curve centered at 0.20-0.80 (healthy range)
+        let density_health = if input.synapse_density < 0.10 {
+            // Too sparse — limited connectivity
+            (input.synapse_density * 10.0 * 64.0) as u16
+        } else if input.synapse_density <= 0.80 {
+            64 // Healthy range
+        } else {
+            // Too dense — saturated, no room for growth
+            ((1.0 - (input.synapse_density - 0.80) / 0.20).max(0.0) * 64.0) as u16
+        };
+
+        // Combine: max theoretical = 128 + 127 + 64 + 64 = 383
+        // Scale to 0-255
+        let raw = coherence_score
+            .saturating_add(da_reward)
+            .saturating_add(activity_health)
+            .saturating_add(density_health)
+            .saturating_sub(cortisol_penalty);
+
+        // Scale: 383 → 255 (multiply by 2/3)
+        let scaled = (raw * 170) / 256; // 170/256 ≈ 0.664
+        scaled.min(255) as u8
+    }
 }
 
 #[cfg(test)]
@@ -2197,5 +2688,142 @@ mod tests {
             pool.neurons.threshold[0], initial_threshold,
             "IntrinsicBursting threshold should not adapt homeostatically"
         );
+    }
+
+    #[test]
+    fn fitness_score_rewards_coherent_da() {
+        let pool = NeuronPool::new("test", 64, PoolConfig::default());
+
+        // High coherence + high DA + healthy activity/density = high fitness
+        let good = FitnessInput {
+            coherence: 200,
+            da: 200,          // 72 above baseline
+            cortisol: 20,     // below baseline — no penalty
+            active_ratio: 0.20,
+            synapse_density: 0.50,
+        };
+        let good_score = pool.compute_fitness(&good);
+
+        // Low coherence + low DA + high cortisol = low fitness
+        let bad = FitnessInput {
+            coherence: 30,
+            da: 80,           // below baseline — no reward
+            cortisol: 200,    // high stress
+            active_ratio: 0.01,  // nearly silent
+            synapse_density: 0.05, // almost no synapses
+        };
+        let bad_score = pool.compute_fitness(&bad);
+
+        assert!(
+            good_score > bad_score + 50,
+            "healthy region ({}) should score much higher than struggling ({})",
+            good_score, bad_score
+        );
+        assert!(good_score >= 140, "healthy region should score well: {}", good_score);
+    }
+
+    #[test]
+    fn evolve_structure_applies_mutations() {
+        // Struggling pool: low coherence, low DA, sparse synapses
+        let mut config = PoolConfig::default();
+        config.evolution.struggle_threshold = 100;
+        config.evolution.struggle_mutation_prob = 255; // always mutate when struggling
+        config.evolution.mutation_budget = 4;
+
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 64, 0.05, config, 42);
+
+        let struggling = FitnessInput {
+            coherence: 20,
+            da: 90,
+            cortisol: 180,
+            active_ratio: 0.02,
+            synapse_density: 0.10,
+        };
+
+        let result = pool.evolve_structure(&struggling, 12345);
+        assert_eq!(result.generation, 1, "generation should increment");
+        assert!(result.mutations_applied > 0, "struggling pool should receive mutations");
+        assert!(!pool.journal.is_empty(), "journal should have entries");
+
+        // Elite pool: high fitness → much lower mutation rate
+        let mut elite_config = PoolConfig::default();
+        elite_config.evolution.elite_threshold = 50; // very low bar so pool qualifies
+        elite_config.evolution.elite_mutation_prob = 0; // never mutate elites
+
+        let mut elite_pool = NeuronPool::with_random_connectivity_seeded("elite", 64, 0.05, elite_config, 42);
+        let elite_fitness = FitnessInput {
+            coherence: 250,
+            da: 230,
+            cortisol: 10,
+            active_ratio: 0.20,
+            synapse_density: 0.50,
+        };
+
+        let elite_result = elite_pool.evolve_structure(&elite_fitness, 99999);
+        assert_eq!(elite_result.mutations_applied, 0, "elite pool should skip mutations");
+        assert_eq!(elite_result.generation, 1, "generation still increments");
+    }
+
+    #[test]
+    fn journal_records_mutations() {
+        let mut config = PoolConfig::default();
+        config.evolution.struggle_mutation_prob = 255;
+        config.evolution.mutation_budget = 4;
+
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 64, 0.05, config, 42);
+
+        let input = FitnessInput {
+            coherence: 20,
+            da: 90,
+            cortisol: 180,
+            active_ratio: 0.02,
+            synapse_density: 0.10,
+        };
+
+        // Run evolution multiple times
+        for i in 0..5 {
+            pool.evolve_structure(&input, i * 1000 + 42);
+        }
+
+        assert_eq!(pool.generation, 5, "generation should be 5 after 5 calls");
+        assert!(pool.journal.len() > 0, "journal should have entries after evolution");
+        assert!(pool.journal.len() <= 16, "journal should not exceed max 16 entries");
+    }
+
+    #[test]
+    fn rollback_restores_structure() {
+        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 64, 0.05, PoolConfig::default(), 42);
+
+        // Capture original state
+        let orig_n = pool.n_neurons;
+        let orig_n_exc = pool.n_excitatory;
+        let orig_flags_0 = pool.neurons.flags[0];
+        let orig_threshold_0 = pool.neurons.threshold[0];
+        let orig_synapse_count = pool.synapses.synapses.len();
+
+        let cp = pool.checkpoint();
+
+        // Mutate: grow neurons, change flags
+        pool.grow_neurons_seeded(8, 999);
+        assert_eq!(pool.n_neurons, 72, "should have grown 8 neurons");
+
+        // Change some flags
+        pool.neurons.flags[0] = 0xFF;
+        pool.neurons.threshold[0] = 12345;
+
+        // Rollback
+        pool.rollback(&cp);
+
+        assert_eq!(pool.n_neurons, orig_n, "n_neurons restored");
+        assert_eq!(pool.n_excitatory, orig_n_exc, "n_excitatory restored");
+        assert_eq!(pool.neurons.flags[0], orig_flags_0, "flags restored");
+        assert_eq!(pool.neurons.threshold[0], orig_threshold_0, "threshold restored");
+
+        // Synapse count should match
+        assert_eq!(pool.synapses.synapses.len(), orig_synapse_count, "synapse count restored");
+
+        // Dynamic state should be reset to resting
+        assert_eq!(pool.neurons.membrane[0], pool.config.resting_potential, "membrane reset to resting");
+        assert_eq!(pool.neurons.trace[0], 0, "trace reset");
     }
 }
