@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Biological neuron pool substrate — LIF neurons with CSR synapses, eligibility traces, and three-factor plasticity"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/Blackfall-Labs/neuropool-rs"
 keywords = ["neuromorphic", "spiking", "plasticity", "neuron", "synapse"]
 categories = ["science", "simulation"]
 
