@@ -518,6 +518,9 @@ pub struct NeuronPool {
     /// Biological basis: a neuron that fired during a processing window is
     /// "active" even if currently in refractory period.
     pub(crate) spike_window: Vec<bool>,
+    /// Per-neuron spike count within the current measurement window (since last inject).
+    /// Rate-coded output: 0 = never fired, 4 = fired every 3rd tick (max with refractory=2).
+    pub spike_window_count: Vec<u8>,
     /// Per-neuron spike counts since last reset. Used by the growth engine
     /// to identify dead (zero-spike) neurons for pruning and active boundaries
     /// for neurogenesis. Reset after each growth_cycle call.
@@ -569,6 +572,7 @@ impl NeuronPool {
             last_spike_count: 0,
             spike_rate: vec![0u16; n_neurons as usize],
             spike_window: vec![false; n_neurons as usize],
+            spike_window_count: vec![0u8; n_neurons as usize],
             spike_counts: vec![0u32; n_neurons as usize],
             initial_neuron_count: n_neurons,
             chem_exposure: vec![0u8; n_neurons as usize],
@@ -1133,7 +1137,8 @@ impl NeuronPool {
             // 2f. Spike check
             if self.neurons.membrane[i] >= self.neurons.threshold[i] {
                 self.neurons.spike_out[i] = true;
-                self.spike_window[i] = true; // Accumulate into measurement window
+                self.spike_window[i] = true;
+                self.spike_window_count[i] = self.spike_window_count[i].saturating_add(1);
                 self.neurons.membrane[i] = self.config.reset_potential;
                 // Per-profile refractory: 0 = use profile default, non-zero = global override
                 self.neurons.refract_remaining[i] = if self.config.refractory_ticks == 0 {
@@ -1278,6 +1283,7 @@ impl NeuronPool {
 
         // Clear spike window — new measurement window begins with each injection
         self.spike_window.fill(false);
+        self.spike_window_count.fill(0);
 
         for i in start..end {
             self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(current);
@@ -1298,8 +1304,12 @@ impl NeuronPool {
 
         (start..end)
             .map(|i| {
-                if self.spike_window[i] {
-                    Signal::positive(255) // Fired during this window
+                let count = self.spike_window_count[i];
+                if count > 0 {
+                    // Rate-coded: scale spike count to magnitude.
+                    // With refractory=2, max ~4 spikes in 12 ticks.
+                    let magnitude = (count as u16 * 64).min(255) as u8;
+                    Signal::positive(magnitude)
                 } else {
                     Signal::zero()
                 }
@@ -1395,6 +1405,7 @@ impl NeuronPool {
         self.projection_current.extend(std::iter::repeat(0i16).take(n_add));
         self.spike_rate.extend(std::iter::repeat(0u16).take(n_add));
         self.spike_window.extend(std::iter::repeat(false).take(n_add));
+        self.spike_window_count.extend(std::iter::repeat(0u8).take(n_add));
         self.spike_counts.extend(std::iter::repeat(0u32).take(n_add));
         self.chem_exposure.extend(std::iter::repeat(0u8).take(n_add));
 
@@ -1500,6 +1511,7 @@ impl NeuronPool {
         compact_vec!(self.projection_current);
         compact_vec!(self.spike_rate);
         compact_vec!(self.spike_window);
+        compact_vec!(self.spike_window_count);
         compact_vec!(self.spike_counts);
         compact_vec!(self.chem_exposure);
 
@@ -1600,6 +1612,7 @@ impl NeuronPool {
             self.projection_current.swap(low_idx, high_idx);
             self.spike_rate.swap(low_idx, high_idx);
             self.spike_window.swap(low_idx, high_idx);
+            self.spike_window_count.swap(low_idx, high_idx);
             self.spike_counts.swap(low_idx, high_idx);
 
             // Remap synapse targets: any synapse targeting low_idx now targets high_idx and vice versa
@@ -1714,6 +1727,7 @@ impl NeuronPool {
         self.neurons.trace.resize(n, 0);
         self.spike_rate.resize(n, 0);
         self.spike_window.resize(n, false);
+        self.spike_window_count.resize(n, 0);
         self.spike_counts.resize(n, 0);
         self.chem_exposure.resize(n, 0);
         self.synaptic_current.resize(n, 0);
@@ -1731,6 +1745,7 @@ impl NeuronPool {
             self.neurons.trace[i] = 0;
             self.spike_rate[i] = 0;
             self.spike_window[i] = false;
+            self.spike_window_count[i] = 0;
             self.spike_counts[i] = 0;
             self.chem_exposure[i] = 0;
         }
@@ -2000,6 +2015,152 @@ impl NeuronPool {
         // Scale: 383 → 255 (multiply by 2/3)
         let scaled = (raw * 170) / 256; // 170/256 ≈ 0.664
         scaled.min(255) as u8
+    }
+
+    // =========================================================================
+    // v4: Spatial Brain Methods
+    // =========================================================================
+
+    /// Initialize spatial positions from grid dimensions.
+    ///
+    /// Must be called after pool creation to enable spatial operations.
+    pub fn init_spatial(&mut self, bounds: [f32; 3]) {
+        self.neurons.init_spatial_from_grid(bounds, (self.dims.w, self.dims.h, self.dims.d));
+    }
+
+    /// Initialize spatial positions with random jitter.
+    pub fn init_spatial_random(&mut self, bounds: [f32; 3], seed: u64) {
+        self.neurons.init_spatial_random(bounds, seed);
+    }
+
+    /// Find neurons within radius of position.
+    pub fn neurons_in_radius(&self, pos: [f32; 3], radius: f32) -> Vec<usize> {
+        self.neurons.neurons_in_radius(pos, radius)
+    }
+
+    /// Compute density at position.
+    pub fn density_at(&self, pos: [f32; 3], sigma: f32) -> f32 {
+        self.neurons.density_at(pos, sigma)
+    }
+
+    /// Inject current to neurons within radius of position.
+    ///
+    /// Current is distributed based on distance (closer = stronger).
+    pub fn inject_spatial(&mut self, pos: [f32; 3], radius: f32, value: i16) {
+        let nearby = self.neurons.neurons_in_radius(pos, radius);
+        if nearby.is_empty() {
+            return;
+        }
+
+        let r2 = radius * radius;
+        for &idx in &nearby {
+            let dx = self.neurons.soma_position[idx][0] - pos[0];
+            let dy = self.neurons.soma_position[idx][1] - pos[1];
+            let dz = self.neurons.soma_position[idx][2] - pos[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+
+            // Distance-weighted injection: full at center, zero at radius
+            let weight = 1.0 - (d2 / r2).sqrt();
+            let current = (value as f32 * weight) as i16;
+
+            self.neurons.membrane[idx] = self.neurons.membrane[idx].saturating_add(current);
+        }
+
+        // Clear spike window for fresh read
+        for &idx in &nearby {
+            self.spike_window[idx] = false;
+            self.spike_window_count[idx] = 0;
+        }
+    }
+
+    /// Read activity from neurons within radius of position.
+    ///
+    /// Returns weighted sum of spike_window_count (rate-coded output).
+    pub fn read_spatial(&self, pos: [f32; 3], radius: f32) -> Vec<i32> {
+        let nearby = self.neurons.neurons_in_radius(pos, radius);
+        if nearby.is_empty() {
+            return vec![0];
+        }
+
+        let r2 = radius * radius;
+        let mut result = Vec::with_capacity(nearby.len());
+
+        for &idx in &nearby {
+            let dx = self.neurons.soma_position[idx][0] - pos[0];
+            let dy = self.neurons.soma_position[idx][1] - pos[1];
+            let dz = self.neurons.soma_position[idx][2] - pos[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+
+            // Distance-weighted output
+            let weight = 1.0 - (d2 / r2).sqrt();
+            let activity = (self.spike_window_count[idx] as f32 * weight * 64.0) as i32;
+            result.push(activity);
+        }
+
+        result
+    }
+
+    /// Get soma position of a neuron.
+    pub fn soma_position(&self, idx: usize) -> Option<[f32; 3]> {
+        if idx < self.neurons.len() {
+            Some(self.neurons.soma_position[idx])
+        } else {
+            None
+        }
+    }
+
+    /// Get axon terminal position of a neuron.
+    pub fn axon_terminal(&self, idx: usize) -> Option<[f32; 3]> {
+        if idx < self.neurons.len() {
+            Some(self.neurons.axon_terminal[idx])
+        } else {
+            None
+        }
+    }
+
+    /// Get all soma positions (for density field updates).
+    pub fn all_soma_positions(&self) -> &[[f32; 3]] {
+        &self.neurons.soma_position
+    }
+
+    /// Decay axon health for all neurons.
+    ///
+    /// Call periodically to apply survival pressure to unused connections.
+    pub fn decay_axon_health(&mut self, decay_rate: u8) {
+        for health in &mut self.neurons.axon_health {
+            *health = health.saturating_sub(decay_rate);
+        }
+    }
+
+    /// Boost axon health for neurons that spiked (activity = survival).
+    pub fn boost_active_axon_health(&mut self, boost: u8) {
+        for idx in 0..self.neurons.len() {
+            if self.spike_window[idx] {
+                self.neurons.axon_health[idx] = self.neurons.axon_health[idx].saturating_add(boost);
+            }
+        }
+    }
+
+    /// Prune neurons with dead axons (health = 0).
+    ///
+    /// Returns number of neurons pruned.
+    pub fn prune_dead_axons(&mut self) -> usize {
+        let mut dead_indices: Vec<usize> = self.neurons.axon_health.iter()
+            .enumerate()
+            .filter(|(_, &h)| h == 0)
+            .map(|(i, _)| i)
+            .collect();
+
+        // Sort descending for safe swap-remove
+        dead_indices.sort_by(|a, b| b.cmp(a));
+
+        let count = self.neurons.remove_descending(&dead_indices);
+
+        // Update pool counts
+        self.n_neurons = self.neurons.len() as u32;
+        // Note: excitatory/inhibitory counts need recomputation if precise tracking needed
+
+        count
     }
 }
 
@@ -2543,6 +2704,7 @@ mod tests {
         assert_eq!(pool.projection_current.len(), 40);
         assert_eq!(pool.spike_rate.len(), 40);
         assert_eq!(pool.spike_window.len(), 40);
+        assert_eq!(pool.spike_window_count.len(), 40);
         assert_eq!(pool.spike_counts.len(), 40);
 
         // New neurons should be at resting potential

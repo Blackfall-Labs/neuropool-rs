@@ -146,7 +146,7 @@ pub mod flags {
 
 /// SoA neuron storage — each field is a separate contiguous array.
 ///
-/// For N neurons, each Vec has exactly N elements. Total memory per neuron: 9 bytes.
+/// For N neurons, each Vec has exactly N elements.
 ///
 /// Layout per neuron across arrays:
 /// - membrane:          2 bytes (i16, Q8.8 fixed-point)
@@ -156,6 +156,12 @@ pub mod flags {
 /// - flags:             1 byte  (u8, excitatory/inhibitory + profile + type)
 /// - trace:             1 byte  (i8, post-synaptic eligibility trace)
 /// - binding_slot:      1 byte  (u8, index into BindingTable; 0 = no binding)
+///
+/// === v4: Physical State (Spatial Brain) ===
+/// - soma_position:     12 bytes (3 × f32, continuous 3D position)
+/// - axon_terminal:     12 bytes (3 × f32, where axon ends)
+/// - dendrite_radius:   4 bytes  (f32, local reception range)
+/// - axon_health:       1 byte   (u8, 0=dead, 255=fully myelinated)
 pub struct NeuronArrays {
     /// Q8.8 fixed-point membrane potential. Resting ~ -17920 (-70 * 256).
     pub membrane: Vec<i16>,
@@ -177,6 +183,24 @@ pub struct NeuronArrays {
     /// Index into the pool's BindingTable. 0 = no binding (Computational neuron).
     /// Values 1-255 map to BindingConfig entries for specialized neurons.
     pub binding_slot: Vec<u8>,
+
+    // === v4: Physical State (Spatial Brain) ===
+
+    /// Soma (cell body) position in continuous 3D space.
+    /// Role emerges from geometry: if axon stays local → gray matter processing,
+    /// if axon leaves dense volume → "output" neuron.
+    pub soma_position: Vec<[f32; 3]>,
+
+    /// Axon terminal position — where the axon ends.
+    /// Distance from soma determines local vs long-range connectivity.
+    pub axon_terminal: Vec<[f32; 3]>,
+
+    /// Dendrite reception radius — neurons within this distance can receive signals.
+    pub dendrite_radius: Vec<f32>,
+
+    /// Axon health: 0 = dead/pruned, 255 = fully myelinated.
+    /// Decays without correlated activity. Below threshold → retraction → death.
+    pub axon_health: Vec<u8>,
 }
 
 impl NeuronArrays {
@@ -184,6 +208,9 @@ impl NeuronArrays {
     ///
     /// Dale's Law: first `n_excitatory` neurons are excitatory (flag bit 0 = 0),
     /// remaining are inhibitory (flag bit 0 = 1).
+    ///
+    /// Physical state (v4): All neurons start at origin with zero axon length
+    /// and default dendrite radius. Use `init_spatial()` to assign positions.
     pub fn new(n: u32, n_excitatory: u32, resting: i16, threshold: i16) -> Self {
         let n = n as usize;
         let n_exc = n_excitatory as usize;
@@ -213,6 +240,55 @@ impl NeuronArrays {
             trace: vec![0i8; n],
             spike_out: vec![false; n],
             binding_slot: vec![0u8; n],
+            // v4: Physical state — default to origin, init_spatial() assigns positions
+            soma_position: vec![[0.0, 0.0, 0.0]; n],
+            axon_terminal: vec![[0.0, 0.0, 0.0]; n],
+            dendrite_radius: vec![1.0; n], // Default 1.0 unit reception radius
+            axon_health: vec![128; n],     // Start healthy (128 = baseline)
+        }
+    }
+
+    /// Initialize spatial positions from grid dimensions.
+    ///
+    /// Distributes neurons evenly in a 3D grid within the given bounds.
+    /// Axon terminals start at soma position (no extension yet).
+    pub fn init_spatial_from_grid(&mut self, bounds: [f32; 3], dims: (u16, u16, u16)) {
+        let (w, h, d) = dims;
+        let n = self.len();
+
+        for i in 0..n {
+            let x = (i % w as usize) as f32;
+            let y = ((i / w as usize) % h as usize) as f32;
+            let z = (i / (w as usize * h as usize)) as f32;
+
+            // Scale to bounds
+            let sx = if w > 1 { bounds[0] * x / (w as f32 - 1.0) } else { bounds[0] * 0.5 };
+            let sy = if h > 1 { bounds[1] * y / (h as f32 - 1.0) } else { bounds[1] * 0.5 };
+            let sz = if d > 1 { bounds[2] * z / (d as f32 - 1.0) } else { bounds[2] * 0.5 };
+
+            self.soma_position[i] = [sx, sy, sz];
+            self.axon_terminal[i] = [sx, sy, sz]; // Starts at soma
+        }
+    }
+
+    /// Initialize spatial positions with random jitter within bounds.
+    ///
+    /// Uses a simple LCG PRNG seeded by the given seed.
+    pub fn init_spatial_random(&mut self, bounds: [f32; 3], seed: u64) {
+        let n = self.len();
+        let mut rng = seed;
+
+        for i in 0..n {
+            // Simple LCG
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let rx = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let ry = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let rz = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+
+            self.soma_position[i] = [bounds[0] * rx, bounds[1] * ry, bounds[2] * rz];
+            self.axon_terminal[i] = self.soma_position[i]; // Starts at soma
         }
     }
 
@@ -231,6 +307,9 @@ impl NeuronArrays {
     /// New neurons follow Dale's Law: first `n_new_excitatory` are excitatory,
     /// remaining are inhibitory. All start at resting potential with zero trace
     /// and no binding.
+    ///
+    /// Physical state: New neurons are placed at origin. Caller should assign
+    /// positions via soma_position after extension.
     pub fn extend(&mut self, additional: u32, n_new_excitatory: u32, resting: i16, threshold: i16) {
         let n = additional as usize;
         let n_exc = n_new_excitatory as usize;
@@ -251,6 +330,11 @@ impl NeuronArrays {
             self.trace.push(0);
             self.spike_out.push(false);
             self.binding_slot.push(0);
+            // v4: Physical state
+            self.soma_position.push([0.0, 0.0, 0.0]);
+            self.axon_terminal.push([0.0, 0.0, 0.0]);
+            self.dendrite_radius.push(1.0);
+            self.axon_health.push(128);
         }
     }
 
@@ -270,9 +354,140 @@ impl NeuronArrays {
             self.trace.swap_remove(idx);
             self.spike_out.swap_remove(idx);
             self.binding_slot.swap_remove(idx);
+            // v4: Physical state
+            self.soma_position.swap_remove(idx);
+            self.axon_terminal.swap_remove(idx);
+            self.dendrite_radius.swap_remove(idx);
+            self.axon_health.swap_remove(idx);
             removed += 1;
         }
         removed
+    }
+
+    // === v4: Spatial Query Methods ===
+
+    /// Find all neuron indices within `radius` of `pos`.
+    ///
+    /// Uses brute-force O(n) scan. For large pools, consider spatial indexing.
+    pub fn neurons_in_radius(&self, pos: [f32; 3], radius: f32) -> Vec<usize> {
+        let r2 = radius * radius;
+        let mut result = Vec::new();
+
+        for i in 0..self.len() {
+            let dx = self.soma_position[i][0] - pos[0];
+            let dy = self.soma_position[i][1] - pos[1];
+            let dz = self.soma_position[i][2] - pos[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+
+            if d2 <= r2 {
+                result.push(i);
+            }
+        }
+
+        result
+    }
+
+    /// Compute local soma density at `pos` using a Gaussian kernel.
+    ///
+    /// Returns estimated density (neurons per unit volume).
+    /// `sigma` controls the kernel width (default: 1.0).
+    pub fn density_at(&self, pos: [f32; 3], sigma: f32) -> f32 {
+        let sigma2 = sigma * sigma;
+        let mut density = 0.0f32;
+
+        for i in 0..self.len() {
+            let dx = self.soma_position[i][0] - pos[0];
+            let dy = self.soma_position[i][1] - pos[1];
+            let dz = self.soma_position[i][2] - pos[2];
+            let d2 = dx * dx + dy * dy + dz * dz;
+
+            // Gaussian contribution: exp(-d² / 2σ²)
+            density += (-d2 / (2.0 * sigma2)).exp();
+        }
+
+        density
+    }
+
+    /// Find the center of mass of neurons near `pos`.
+    ///
+    /// Returns None if no neurons within radius.
+    pub fn cluster_center(&self, pos: [f32; 3], radius: f32) -> Option<[f32; 3]> {
+        let nearby = self.neurons_in_radius(pos, radius);
+        if nearby.is_empty() {
+            return None;
+        }
+
+        let mut cx = 0.0f32;
+        let mut cy = 0.0f32;
+        let mut cz = 0.0f32;
+
+        for &i in &nearby {
+            cx += self.soma_position[i][0];
+            cy += self.soma_position[i][1];
+            cz += self.soma_position[i][2];
+        }
+
+        let n = nearby.len() as f32;
+        Some([cx / n, cy / n, cz / n])
+    }
+
+    /// Grow axon one step toward direction, returning true if successful.
+    ///
+    /// Growth fails probabilistically based on local density (resistance).
+    pub fn grow_axon_step(&mut self, neuron_idx: usize, direction: [f32; 3], density_sigma: f32, resistance_factor: f32, seed: u64) -> bool {
+        if neuron_idx >= self.len() {
+            return false;
+        }
+
+        let terminal = self.axon_terminal[neuron_idx];
+        let new_pos = [
+            terminal[0] + direction[0],
+            terminal[1] + direction[1],
+            terminal[2] + direction[2],
+        ];
+
+        // Check density at new position
+        let density = self.density_at(new_pos, density_sigma);
+        let resistance = (density * resistance_factor).min(1.0);
+
+        // Probabilistic growth based on resistance
+        let rng = seed.wrapping_mul(6364136223846793005).wrapping_add(neuron_idx as u64);
+        let rand_val = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+
+        if rand_val > resistance {
+            self.axon_terminal[neuron_idx] = new_pos;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Retract axon one step toward soma.
+    pub fn retract_axon_step(&mut self, neuron_idx: usize, step_size: f32) {
+        if neuron_idx >= self.len() {
+            return;
+        }
+
+        let soma = self.soma_position[neuron_idx];
+        let terminal = self.axon_terminal[neuron_idx];
+
+        let dx = soma[0] - terminal[0];
+        let dy = soma[1] - terminal[1];
+        let dz = soma[2] - terminal[2];
+        let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+        if dist < step_size {
+            // Already at soma
+            self.axon_terminal[neuron_idx] = soma;
+        } else {
+            // Move toward soma
+            let scale = step_size / dist;
+            self.axon_terminal[neuron_idx] = [
+                terminal[0] + dx * scale,
+                terminal[1] + dy * scale,
+                terminal[2] + dz * scale,
+            ];
+        }
     }
 }
 

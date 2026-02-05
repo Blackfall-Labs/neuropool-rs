@@ -183,6 +183,11 @@ fn deserialize_neurons(r: &mut &[u8], n: usize) -> io::Result<NeuronArrays> {
         trace,
         spike_out,
         binding_slot: vec![0u8; n],
+        // v4: Physical state — defaults, init_spatial() assigns actual positions
+        soma_position: vec![[0.0, 0.0, 0.0]; n],
+        axon_terminal: vec![[0.0, 0.0, 0.0]; n],
+        dendrite_radius: vec![1.0; n],
+        axon_health: vec![128; n],
     })
 }
 
@@ -400,6 +405,7 @@ impl NeuronPool {
             last_spike_count: 0,
             spike_rate: vec![0u16; delay_buf_n],
             spike_window: vec![false; delay_buf_n],
+            spike_window_count: vec![0u8; delay_buf_n],
             spike_counts,
             initial_neuron_count,
             chem_exposure: vec![0u8; delay_buf_n],
