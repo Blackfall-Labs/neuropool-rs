@@ -229,6 +229,9 @@ impl SpatialRuntime {
         // Cascade propagation with tissue physics
         let spikes = self.cascade.run_until_with_tissue(target_time, &self.tissue);
 
+        // Per-frame stamina recovery (before correlation tracking)
+        self.cascade.recover_stamina(frame_interval_us);
+
         // Record spikes for correlation tracking
         for (idx, neuron) in self.cascade.neurons.iter().enumerate() {
             if neuron.last_spike_us > self.time_us.saturating_sub(frame_interval_us) {

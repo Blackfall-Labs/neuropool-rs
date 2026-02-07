@@ -502,6 +502,22 @@ impl SpatialCascade {
         }
     }
 
+    /// Recover stamina for all neurons based on frame duration.
+    ///
+    /// Called once per frame from the runtime. Recovery is proportional
+    /// to elapsed time: 1 stamina point per STAMINA_RECOVERY_US microseconds.
+    /// This is intentionally NOT in apply_leak() — event-driven recovery
+    /// let depleted neurons stutter-fire via arrival-triggered leak.
+    pub fn recover_stamina(&mut self, frame_interval_us: u64) {
+        let recovery = (frame_interval_us / SpatialNeuron::STAMINA_RECOVERY_US) as u8;
+        if recovery == 0 {
+            return;
+        }
+        for neuron in &mut self.neurons {
+            neuron.stamina = neuron.stamina.saturating_add(recovery);
+        }
+    }
+
     /// Clear the event queue.
     pub fn clear_pending(&mut self) {
         self.pending.clear();
@@ -746,5 +762,36 @@ mod tests {
 
         cascade.reset_time();
         assert_eq!(cascade.sim_time(), 0);
+    }
+
+    #[test]
+    fn test_recover_stamina() {
+        let mut cascade = SpatialCascade::new(SpatialCascadeConfig::default());
+
+        let mut n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        n.stamina = 100;
+        cascade.add_neuron(n);
+
+        // 10ms frame → 10_000 / 5_000 = 2 recovery
+        cascade.recover_stamina(10_000);
+        assert_eq!(cascade.neurons[0].stamina, 102);
+
+        // Saturates at 255
+        cascade.neurons[0].stamina = 254;
+        cascade.recover_stamina(10_000);
+        assert_eq!(cascade.neurons[0].stamina, 255);
+    }
+
+    #[test]
+    fn test_recover_stamina_short_frame() {
+        let mut cascade = SpatialCascade::new(SpatialCascadeConfig::default());
+
+        let mut n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        n.stamina = 100;
+        cascade.add_neuron(n);
+
+        // Frame shorter than recovery period → no recovery
+        cascade.recover_stamina(4_000);
+        assert_eq!(cascade.neurons[0].stamina, 100);
     }
 }

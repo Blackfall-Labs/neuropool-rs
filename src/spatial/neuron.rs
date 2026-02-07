@@ -28,6 +28,12 @@ pub struct SpatialNeuron {
     /// Eligibility trace for learning
     pub trace: i8,
 
+    // === Metabolic State ===
+    /// Neural stamina (255 = full, 0 = depleted). Spikes cost stamina
+    /// proportional to metabolic_rate. Recharges during rest.
+    /// Depleted neurons enter metabolic refractory and cannot fire.
+    pub stamina: u8,
+
     // === Timing ===
     /// Last update time in microseconds (for delta-time leak)
     pub last_update_us: u64,
@@ -44,6 +50,10 @@ impl SpatialNeuron {
     pub const RESET_POTENTIAL: i16 = -8000;
     /// Default firing threshold.
     pub const DEFAULT_THRESHOLD: i16 = -5500;
+    /// Microseconds of rest needed per 1 stamina point of recovery.
+    /// At 5000 μs (5ms): 2 stamina recovered per 10ms frame.
+    /// With spike cost ~10 (pyramidal), max sustained rate = 0.2 fires/frame (20 Hz).
+    pub const STAMINA_RECOVERY_US: u64 = 5_000;
 
     /// Create a new spatial neuron.
     #[inline]
@@ -56,6 +66,7 @@ impl SpatialNeuron {
             membrane: Self::RESTING_POTENTIAL,
             threshold: Self::DEFAULT_THRESHOLD,
             trace: 0,
+            stamina: 255,
             last_update_us: 0,
             last_spike_us: 0,
             last_arrival_us: 0,
@@ -120,15 +131,17 @@ impl SpatialNeuron {
     }
 
     /// Can the neuron fire right now?
+    ///
+    /// Requires: above threshold, not in refractory period, and has stamina.
     #[inline]
     pub const fn can_fire(&self, current_time_us: u64) -> bool {
-        self.above_threshold() && !self.in_refractory(current_time_us)
+        self.above_threshold() && !self.in_refractory(current_time_us) && self.stamina > 0
     }
 
     /// Apply leak for elapsed time.
     ///
     /// Uses exponential decay toward resting potential based on
-    /// the nuclei's leak rate.
+    /// the nuclei's leak rate. Also recovers stamina during rest.
     pub fn apply_leak(&mut self, current_time_us: u64) {
         if current_time_us <= self.last_update_us {
             return;
@@ -138,9 +151,15 @@ impl SpatialNeuron {
         let tau = self.nuclei.leak_tau_us() as f32;
 
         // Exponential decay: V = V_rest + (V - V_rest) * e^(-dt/tau)
+        // Use i32 to avoid overflow when membrane is far from resting.
         let decay = (-(dt_us as f32) / tau).exp();
-        let delta_from_rest = self.membrane - Self::RESTING_POTENTIAL;
-        self.membrane = Self::RESTING_POTENTIAL + (delta_from_rest as f32 * decay) as i16;
+        let delta_from_rest = self.membrane as i32 - Self::RESTING_POTENTIAL as i32;
+        let decayed = (delta_from_rest as f32 * decay) as i32;
+        self.membrane = (Self::RESTING_POTENTIAL as i32 + decayed).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+
+        // Stamina recovery is handled per-frame by the runtime, NOT here.
+        // This prevents the event-driven cascade from trickling recovery
+        // to depleted neurons via frequent arrival events.
 
         self.last_update_us = current_time_us;
     }
@@ -151,12 +170,17 @@ impl SpatialNeuron {
         self.membrane = self.membrane.saturating_add(current);
     }
 
-    /// Fire the neuron (reset membrane, update spike time, boost trace).
+    /// Fire the neuron (reset membrane, update spike time, boost trace, drain stamina).
     pub fn fire(&mut self, current_time_us: u64) {
         self.membrane = Self::RESET_POTENTIAL;
         self.last_spike_us = current_time_us;
         self.trace = self.trace.saturating_add(30); // boost trace on fire
         self.axon.boost(10); // activity keeps axon healthy
+
+        // Each spike costs stamina proportional to metabolic rate.
+        // Pyramidal (100) → 10, relay (50) → 5, oscillator (120) → 12.
+        let cost = (self.nuclei.metabolic_rate / 10).max(5);
+        self.stamina = self.stamina.saturating_sub(cost);
     }
 
     /// Decay the eligibility trace.
@@ -464,5 +488,65 @@ mod tests {
         assert_eq!(n.dendrite.spine_count, 200);
         assert_eq!(n.axon.myelin, 200);
         assert!(n.nuclei.is_excitatory());
+    }
+
+    #[test]
+    fn test_stamina_starts_full() {
+        let n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        assert_eq!(n.stamina, 255);
+    }
+
+    #[test]
+    fn test_stamina_drains_on_fire() {
+        let mut n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        n.membrane = SpatialNeuron::DEFAULT_THRESHOLD + 100;
+        assert_eq!(n.stamina, 255);
+
+        n.fire(1000);
+        // Pyramidal metabolic_rate=100, cost = 100/10 = 10
+        assert_eq!(n.stamina, 245);
+    }
+
+    #[test]
+    fn test_stamina_depletion_blocks_firing() {
+        let mut n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        n.membrane = SpatialNeuron::DEFAULT_THRESHOLD + 100;
+        n.stamina = 0;
+
+        // Above threshold but no stamina → can't fire
+        assert!(n.above_threshold());
+        assert!(!n.can_fire(0));
+    }
+
+    #[test]
+    fn test_stamina_no_recovery_in_leak() {
+        let mut n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        n.stamina = 100;
+        n.last_update_us = 0;
+
+        // apply_leak does NOT recover stamina — that's the runtime's job
+        n.apply_leak(10_000);
+        assert_eq!(n.stamina, 100);
+    }
+
+    #[test]
+    fn test_rapid_firing_depletes_stamina() {
+        let mut n = SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]);
+        // Fire 25 times without rest (pyramidal cost = 10 each)
+        for i in 0..25 {
+            n.membrane = SpatialNeuron::DEFAULT_THRESHOLD + 100;
+            n.fire(i * 100);
+        }
+        // 25 * 10 = 250 drained from 255 → 5 remaining
+        assert_eq!(n.stamina, 5);
+
+        // One more fire depletes
+        n.membrane = SpatialNeuron::DEFAULT_THRESHOLD + 100;
+        n.fire(2600);
+        assert_eq!(n.stamina, 0);
+
+        // Now can't fire even above threshold
+        n.membrane = SpatialNeuron::DEFAULT_THRESHOLD + 100;
+        assert!(!n.can_fire(3000));
     }
 }
