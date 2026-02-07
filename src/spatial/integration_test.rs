@@ -444,6 +444,9 @@ mod tests {
                     min_distance: 0.3,
                     max_step: 0.2,
                     axon_elasticity: 0.8,
+                    exclusion_radius: 0.3,
+                    exclusion_strength: 2.0,
+                    origin_spring: 0.0,
                 };
 
                 let forces = compute_migration_forces(
@@ -451,6 +454,8 @@ mod tests {
                     &correlations,
                     &migration_config,
                     time,
+                    None,
+                    None,
                 );
                 apply_migration(&mut cascade.neurons, &forces, &migration_config);
             }
@@ -502,6 +507,7 @@ mod tests {
             white_ratio: 2.0,
             path_samples: 5,
             base_velocity: 0.001,
+            ..Default::default()
         });
         tissue.rebuild(&cascade.neurons);
 

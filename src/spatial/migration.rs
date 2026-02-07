@@ -19,7 +19,7 @@
 //!   6. Axon terminal follows soma (elastic connection)
 //! ```
 
-use super::SpatialNeuron;
+use super::{SpatialNeuron, TissueField};
 
 /// Configuration for neuron migration.
 #[derive(Clone, Copy, Debug)]
@@ -38,6 +38,12 @@ pub struct MigrationConfig {
     pub max_step: f32,
     /// Axon elasticity (0.0 = rigid, 1.0 = fully elastic)
     pub axon_elasticity: f32,
+    /// Volume exclusion radius — unconditional short-range repulsion (prevents point collapse)
+    pub exclusion_radius: f32,
+    /// Volume exclusion strength
+    pub exclusion_strength: f32,
+    /// Origin spring strength — homeostatic anchor toward initial position (0 = disabled)
+    pub origin_spring: f32,
 }
 
 impl Default for MigrationConfig {
@@ -50,6 +56,9 @@ impl Default for MigrationConfig {
             min_distance: 0.5,
             max_step: 0.5,
             axon_elasticity: 0.8,
+            exclusion_radius: 0.3,
+            exclusion_strength: 2.0,
+            origin_spring: 0.0,
         }
     }
 }
@@ -182,11 +191,18 @@ impl CorrelationTracker {
 }
 
 /// Compute migration forces for all neurons.
+///
+/// If a `TissueField` is provided, forces are attenuated by the local
+/// tissue resistance at each neuron's position: `force /= (1 + R)`.
+/// This makes neurons move slower through stiff tissue and faster through
+/// softened corridors.
 pub fn compute_migration_forces(
     neurons: &[SpatialNeuron],
     correlations: &CorrelationTracker,
     config: &MigrationConfig,
     current_time: u64,
+    origins: Option<&[[f32; 3]]>,
+    tissue: Option<&TissueField>,
 ) -> Vec<[f32; 3]> {
     let mut forces = vec![[0.0f32; 3]; neurons.len()];
 
@@ -224,7 +240,7 @@ pub fn compute_migration_forces(
             }
         }
 
-        // Repulsion from uncorrelated same-type neurons (competitors)
+        // Repulsion forces: volume exclusion + competitive repulsion
         let mut repulsion = [0.0f32; 3];
         let mut repulsion_count = 0;
 
@@ -233,7 +249,24 @@ pub fn compute_migration_forces(
                 continue;
             }
 
-            // Same nuclei polarity = competitor
+            let other_pos = neurons[j].soma.position;
+            let dx = pos[0] - other_pos[0];
+            let dy = pos[1] - other_pos[1];
+            let dz = pos[2] - other_pos[2];
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+            let dist = dist_sq.sqrt();
+
+            // Volume exclusion — ALL neurons, unconditional at short range.
+            // Neurons are physical objects; even correlated ones can't share a point.
+            if config.exclusion_radius > 0.0 && dist < config.exclusion_radius && dist > 0.001 {
+                let strength = config.exclusion_strength * (1.0 - dist / config.exclusion_radius);
+                let norm = 1.0 / dist;
+                forces[i][0] += dx * norm * strength;
+                forces[i][1] += dy * norm * strength;
+                forces[i][2] += dz * norm * strength;
+            }
+
+            // Competitive repulsion — same-type, uncorrelated only
             let same_type = neurons[i].nuclei.polarity == neurons[j].nuclei.polarity
                 && neurons[i].nuclei.interface.kind == neurons[j].nuclei.interface.kind;
 
@@ -241,19 +274,10 @@ pub fn compute_migration_forces(
                 continue;
             }
 
-            // Check if uncorrelated
             let corr = correlations.correlation(i, j, current_time);
             if corr >= config.correlation_threshold {
                 continue; // correlated, not a competitor
             }
-
-            let other_pos = neurons[j].soma.position;
-            let dx = pos[0] - other_pos[0];
-            let dy = pos[1] - other_pos[1];
-            let dz = pos[2] - other_pos[2];
-
-            let dist_sq = dx * dx + dy * dy + dz * dz;
-            let dist = dist_sq.sqrt();
 
             if dist < config.min_distance * 3.0 && dist > 0.01 {
                 // Inverse square repulsion
@@ -271,6 +295,16 @@ pub fn compute_migration_forces(
             forces[i][1] += repulsion[1] * scale;
             forces[i][2] += repulsion[2] * scale;
         }
+
+        // Origin spring — homeostatic anchor toward initial position
+        if config.origin_spring > 0.0 {
+            if let Some(origins) = origins {
+                let origin = origins[i];
+                forces[i][0] += (origin[0] - pos[0]) * config.origin_spring;
+                forces[i][1] += (origin[1] - pos[1]) * config.origin_spring;
+                forces[i][2] += (origin[2] - pos[2]) * config.origin_spring;
+            }
+        }
     }
 
     // Clamp forces to max step
@@ -281,6 +315,18 @@ pub fn compute_migration_forces(
             force[0] *= scale;
             force[1] *= scale;
             force[2] *= scale;
+        }
+    }
+
+    // Tissue resistance attenuation: force /= (1 + R)
+    // Stiff tissue (high R) damps movement. Softened corridors (low R) let neurons slide.
+    if let Some(tissue) = tissue {
+        for (i, force) in forces.iter_mut().enumerate() {
+            let r = tissue.resistance_at(neurons[i].soma.position, neurons);
+            let damping = 1.0 / (1.0 + r);
+            force[0] *= damping;
+            force[1] *= damping;
+            force[2] *= damping;
         }
     }
 
@@ -322,8 +368,10 @@ pub fn migrate_step(
     correlations: &CorrelationTracker,
     config: &MigrationConfig,
     current_time: u64,
+    origins: Option<&[[f32; 3]]>,
+    tissue: Option<&TissueField>,
 ) {
-    let forces = compute_migration_forces(neurons, correlations, config, current_time);
+    let forces = compute_migration_forces(neurons, correlations, config, current_time, origins, tissue);
     apply_migration(neurons, &forces, config);
 }
 
@@ -409,7 +457,7 @@ mod tests {
             SpatialNeuron::pyramidal_at([5.0, 0.0, 0.0]),
         ];
 
-        let forces = compute_migration_forces(&neurons, &tracker, &config, 10000);
+        let forces = compute_migration_forces(&neurons, &tracker, &config, 10000, None, None);
 
         // Neuron 0 should be attracted toward neuron 1 (positive x)
         assert!(forces[0][0] > 0.0);
@@ -429,7 +477,7 @@ mod tests {
             SpatialNeuron::pyramidal_at([0.5, 0.0, 0.0]), // close together
         ];
 
-        let forces = compute_migration_forces(&neurons, &tracker, &config, 10000);
+        let forces = compute_migration_forces(&neurons, &tracker, &config, 10000, None, None);
 
         // Should repel each other
         assert!(forces[0][0] < 0.0); // pushed away from 1
@@ -467,7 +515,7 @@ mod tests {
             SpatialNeuron::pyramidal_at([100.0, 0.0, 0.0]), // very far
         ];
 
-        let forces = compute_migration_forces(&neurons, &tracker, &config, 0);
+        let forces = compute_migration_forces(&neurons, &tracker, &config, 0, None, None);
 
         // Force magnitude should be clamped
         for force in &forces {

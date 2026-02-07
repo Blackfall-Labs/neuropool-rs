@@ -33,6 +33,8 @@ pub struct SpatialNeuron {
     pub last_update_us: u64,
     /// Last spike time in microseconds (for refractory)
     pub last_spike_us: u64,
+    /// Last arrival time in microseconds (for fast coincidence detection)
+    pub last_arrival_us: u64,
 }
 
 impl SpatialNeuron {
@@ -56,6 +58,7 @@ impl SpatialNeuron {
             trace: 0,
             last_update_us: 0,
             last_spike_us: 0,
+            last_arrival_us: 0,
         }
     }
 

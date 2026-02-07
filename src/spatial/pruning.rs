@@ -152,6 +152,12 @@ pub fn decay_axon_health(
     let mut depleted = 0;
 
     for (idx, neuron) in neurons.iter_mut().enumerate() {
+        // Interface neurons (sensory/motor) are terminals — they don't project
+        // outward through the network. Don't decay their axons for "inactivity".
+        if neuron.nuclei.is_motor() || neuron.nuclei.is_sensory() {
+            continue;
+        }
+
         let outgoing = synapses.outgoing(idx as u32);
 
         if outgoing.is_empty() {
@@ -192,24 +198,6 @@ pub fn retract_dead_axons(neurons: &mut [SpatialNeuron], config: &PruningConfig)
             neuron.axon.retract_toward(neuron.soma.position, config.retraction_rate);
         }
     }
-}
-
-/// Prune synapses from depleted axons (health = 0).
-///
-/// Returns indices of neurons whose synapses were all pruned.
-pub fn prune_from_depleted_axons(
-    neurons: &[SpatialNeuron],
-    synapses: &SpatialSynapseStore,
-) -> Vec<u32> {
-    let mut depleted_neurons = Vec::new();
-
-    for (idx, neuron) in neurons.iter().enumerate() {
-        if !neuron.axon.is_alive() && !synapses.outgoing(idx as u32).is_empty() {
-            depleted_neurons.push(idx as u32);
-        }
-    }
-
-    depleted_neurons
 }
 
 /// Perform one pruning cycle.
@@ -262,27 +250,6 @@ pub fn hard_prune(
     dormancy.resize(after);
 
     before - after
-}
-
-/// Soft prune: weaken synapses based on inactivity.
-///
-/// Gradually reduces magnitude of inactive synapses.
-pub fn soft_prune(
-    synapses: &mut SpatialSynapseStore,
-    config: &PruningConfig,
-) {
-    for syn in synapses.iter_mut() {
-        if syn.signal.magnitude < config.activity_threshold {
-            // Already dormant, don't weaken further
-            continue;
-        }
-
-        // Check if synapse was recently active (via maturity as proxy)
-        if syn.maturity < 50 {
-            // Young synapse with low activity — weaken
-            syn.weaken(1);
-        }
-    }
 }
 
 #[cfg(test)]
@@ -419,34 +386,6 @@ mod tests {
 
         assert_eq!(result.synapses_active, 1);
         assert_eq!(result.synapses_dormant, 1);
-    }
-
-    #[test]
-    fn test_soft_prune() {
-        let mut store = SpatialSynapseStore::new(2);
-
-        // Young, low-activity synapse
-        let mut young_syn = make_test_synapse(20);
-        young_syn.maturity = 10;
-        store.add(young_syn);
-
-        // Mature synapse
-        let mut mature_syn = make_test_synapse(20);
-        mature_syn.maturity = 100;
-        store.add(mature_syn);
-
-        store.rebuild_index(2);
-
-        let config = PruningConfig {
-            activity_threshold: 5,
-            ..Default::default()
-        };
-
-        soft_prune(&mut store, &config);
-
-        // Only young synapse should have been weakened
-        // (Note: we can't easily check individual synapses after rebuild,
-        // but the test verifies the logic runs without error)
     }
 
     #[test]

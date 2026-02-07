@@ -62,4 +62,5 @@ pub use spatial::{
     Axon, Dendrite, EnergyGates, Interface, InterfaceAction,
     MasteryConfig, MasteryState, Nuclei, PolarityChange,
     Polarity, Signal, SpatialNeuron, SpatialSynapse, Soma,
+    SpatialRuntime, SpatialRuntimeConfig, WiringConfig, wire_by_proximity,
 };

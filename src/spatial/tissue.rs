@@ -275,6 +275,18 @@ pub struct TissueConfig {
     pub path_samples: usize,
     /// Base propagation velocity (units per microsecond).
     pub base_velocity: f32,
+    /// Baseline resistance for all neurons (default medium stiffness).
+    pub baseline_resistance: f32,
+    /// Baseline conductivity for all neurons (default medium conductivity).
+    pub baseline_conductivity: f32,
+    /// Rate at which active pathways soften (resistance decreases per plasticity tick).
+    pub softening_rate: f32,
+    /// Rate at which active pathways conduct better (per plasticity tick).
+    pub conductivity_growth_rate: f32,
+    /// Rate at which inactive tissue stiffens back toward baseline.
+    pub stiffening_rate: f32,
+    /// Rate at which inactive conductivity decays toward baseline.
+    pub conductivity_decay_rate: f32,
 }
 
 impl Default for TissueConfig {
@@ -287,6 +299,12 @@ impl Default for TissueConfig {
             white_ratio: 3.0,
             path_samples: 10,
             base_velocity: 0.001, // 1 unit per millisecond
+            baseline_resistance: 0.5,
+            baseline_conductivity: 0.3,
+            softening_rate: 0.02,
+            conductivity_growth_rate: 0.03,
+            stiffening_rate: 0.005,
+            conductivity_decay_rate: 0.008,
         }
     }
 }
@@ -296,6 +314,11 @@ impl Default for TissueConfig {
 // ============================================================================
 
 /// Continuous tissue field computed from neuron positions.
+///
+/// Persistent state: per-neuron resistance and conductivity arrays accumulate
+/// slowly from activity, providing a substrate that resists migration and
+/// modulates signal propagation. Field values at arbitrary 3D positions are
+/// obtained via Gaussian kernel interpolation from nearby neurons — no voxels.
 #[derive(Clone, Debug)]
 pub struct TissueField {
     /// Spatial hash for soma positions.
@@ -306,6 +329,12 @@ pub struct TissueField {
     config: TissueConfig,
     /// Cached neuron count (for validation).
     neuron_count: usize,
+    /// Per-neuron local resistance (persistent, accumulates slowly).
+    /// High = hard to move through, low = corridor.
+    resistance: Vec<f32>,
+    /// Per-neuron local conductivity (persistent, accumulates slowly).
+    /// High = fast signal propagation (highway), low = lossy.
+    conductivity: Vec<f32>,
 }
 
 impl TissueField {
@@ -321,11 +350,17 @@ impl TissueField {
             axon_segments: Vec::new(),
             config,
             neuron_count: 0,
+            resistance: Vec::new(),
+            conductivity: Vec::new(),
         }
     }
 
     /// Rebuild the field from neurons.
+    ///
+    /// Updates spatial hash and axon segments. Preserves accumulated
+    /// resistance/conductivity state — new neurons get baseline values.
     pub fn rebuild(&mut self, neurons: &[SpatialNeuron]) {
+        let old_count = self.neuron_count;
         self.neuron_count = neurons.len();
         self.soma_hash.rebuild(neurons);
 
@@ -333,6 +368,16 @@ impl TissueField {
         self.axon_segments.reserve(neurons.len());
         for (idx, neuron) in neurons.iter().enumerate() {
             self.axon_segments.push(AxonSegment::from_neuron(idx as u32, neuron));
+        }
+
+        // Preserve existing tissue state, extend for new neurons
+        if neurons.len() > old_count {
+            self.resistance.resize(neurons.len(), self.config.baseline_resistance);
+            self.conductivity.resize(neurons.len(), self.config.baseline_conductivity);
+        } else if self.resistance.is_empty() {
+            // First rebuild — initialize all to baseline
+            self.resistance = vec![self.config.baseline_resistance; neurons.len()];
+            self.conductivity = vec![self.config.baseline_conductivity; neurons.len()];
         }
     }
 
@@ -343,6 +388,110 @@ impl TissueField {
                 self.axon_segments[idx] = AxonSegment::from_neuron(idx as u32, neuron);
             }
         }
+    }
+
+    // ========================================================================
+    // Persistent Tissue Substrate — Resistance & Conductivity
+    // ========================================================================
+
+    /// Kernel-interpolated resistance at an arbitrary 3D position.
+    ///
+    /// Queries the spatial hash for nearby neurons, blends their per-neuron
+    /// resistance values using a Gaussian kernel. Returns a scalar ≥ 0
+    /// where higher values mean stiffer medium (harder to migrate through).
+    pub fn resistance_at(&self, pos: [f32; 3], neurons: &[SpatialNeuron]) -> f32 {
+        if self.resistance.is_empty() {
+            return self.config.baseline_resistance;
+        }
+        self.interpolate_field(pos, neurons, &self.resistance, self.config.baseline_resistance)
+    }
+
+    /// Kernel-interpolated conductivity at an arbitrary 3D position.
+    ///
+    /// Returns a scalar ≥ 0 where higher values mean faster signal
+    /// propagation (highway tissue).
+    pub fn conductivity_at(&self, pos: [f32; 3], neurons: &[SpatialNeuron]) -> f32 {
+        if self.conductivity.is_empty() {
+            return self.config.baseline_conductivity;
+        }
+        self.interpolate_field(pos, neurons, &self.conductivity, self.config.baseline_conductivity)
+    }
+
+    /// Generic kernel-interpolated field query.
+    fn interpolate_field(
+        &self,
+        pos: [f32; 3],
+        neurons: &[SpatialNeuron],
+        values: &[f32],
+        fallback: f32,
+    ) -> f32 {
+        let nearby = self.soma_hash.query_radius(pos, self.config.kernel_radius);
+        let radius_sq = self.config.kernel_radius * self.config.kernel_radius;
+
+        let mut weighted_sum = 0.0f32;
+        let mut weight_total = 0.0f32;
+
+        for idx in nearby {
+            let idx = idx as usize;
+            if idx >= neurons.len() || idx >= values.len() {
+                continue;
+            }
+            let soma_pos = neurons[idx].soma.position;
+            let dx = pos[0] - soma_pos[0];
+            let dy = pos[1] - soma_pos[1];
+            let dz = pos[2] - soma_pos[2];
+            let dist_sq = dx * dx + dy * dy + dz * dz;
+
+            if dist_sq <= radius_sq {
+                let w = self.gaussian_kernel(dist_sq.sqrt());
+                weighted_sum += values[idx] * w;
+                weight_total += w;
+            }
+        }
+
+        if weight_total > 0.001 {
+            weighted_sum / weight_total
+        } else {
+            fallback
+        }
+    }
+
+    /// Update tissue plasticity based on recent neuron activity.
+    ///
+    /// `active_mask[i]` is true if neuron `i` fired recently.
+    /// Active neurons: resistance softens, conductivity grows.
+    /// Inactive neurons: drift back toward baseline.
+    ///
+    /// This runs on the slow clock — much slower than synaptic plasticity.
+    pub fn update_plasticity(&mut self, active_mask: &[bool]) {
+        let n = self.resistance.len().min(active_mask.len());
+        for i in 0..n {
+            if active_mask[i] {
+                // Active pathway: soften resistance, boost conductivity
+                self.resistance[i] = (self.resistance[i] - self.config.softening_rate).max(0.0);
+                self.conductivity[i] = (self.conductivity[i] + self.config.conductivity_growth_rate).min(1.0);
+            } else {
+                // Inactive: stiffen back toward baseline, conductivity decays
+                if self.resistance[i] < self.config.baseline_resistance {
+                    self.resistance[i] = (self.resistance[i] + self.config.stiffening_rate)
+                        .min(self.config.baseline_resistance);
+                }
+                if self.conductivity[i] > self.config.baseline_conductivity {
+                    self.conductivity[i] = (self.conductivity[i] - self.config.conductivity_decay_rate)
+                        .max(self.config.baseline_conductivity);
+                }
+            }
+        }
+    }
+
+    /// Get per-neuron resistance slice (for diagnostics).
+    pub fn resistance_values(&self) -> &[f32] {
+        &self.resistance
+    }
+
+    /// Get per-neuron conductivity slice (for diagnostics).
+    pub fn conductivity_values(&self) -> &[f32] {
+        &self.conductivity
     }
 
     /// Gaussian kernel for density estimation.
@@ -1473,5 +1622,149 @@ mod tests {
             axon_d > 0.0 || tissue_tract.is_white(),
             "Tract area should have axon density or be white matter"
         );
+    }
+
+    // ========================================================================
+    // Persistent Tissue Substrate Tests
+    // ========================================================================
+
+    #[test]
+    fn test_resistance_at_returns_baseline_initially() {
+        let neurons = vec![
+            SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]),
+            SpatialNeuron::pyramidal_at([1.0, 0.0, 0.0]),
+            SpatialNeuron::pyramidal_at([0.5, 0.5, 0.0]),
+        ];
+
+        let mut field = TissueField::new();
+        field.rebuild(&neurons);
+
+        let r = field.resistance_at([0.5, 0.25, 0.0], &neurons);
+        let baseline = field.config().baseline_resistance;
+        assert!(
+            (r - baseline).abs() < 0.01,
+            "Initial resistance should be near baseline {}, got {}",
+            baseline, r
+        );
+    }
+
+    #[test]
+    fn test_conductivity_at_returns_baseline_initially() {
+        let neurons = vec![
+            SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]),
+            SpatialNeuron::pyramidal_at([1.0, 0.0, 0.0]),
+        ];
+
+        let mut field = TissueField::new();
+        field.rebuild(&neurons);
+
+        let c = field.conductivity_at([0.5, 0.0, 0.0], &neurons);
+        let baseline = field.config().baseline_conductivity;
+        assert!(
+            (c - baseline).abs() < 0.01,
+            "Initial conductivity should be near baseline {}, got {}",
+            baseline, c
+        );
+    }
+
+    #[test]
+    fn test_plasticity_softens_active_neurons() {
+        let neurons = vec![
+            SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]),
+            SpatialNeuron::pyramidal_at([5.0, 0.0, 0.0]),
+        ];
+
+        let mut field = TissueField::new();
+        field.rebuild(&neurons);
+
+        let r_before = field.resistance_values()[0];
+        let c_before = field.conductivity_values()[0];
+
+        // Neuron 0 active, neuron 1 inactive
+        field.update_plasticity(&[true, false]);
+
+        let r_after = field.resistance_values()[0];
+        let c_after = field.conductivity_values()[0];
+
+        assert!(r_after < r_before, "Active neuron resistance should decrease");
+        assert!(c_after > c_before, "Active neuron conductivity should increase");
+
+        // Inactive neuron should stay at baseline
+        assert_eq!(field.resistance_values()[1], r_before);
+        assert_eq!(field.conductivity_values()[1], c_before);
+    }
+
+    #[test]
+    fn test_plasticity_stiffens_inactive_neurons_back_to_baseline() {
+        let neurons = vec![SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0])];
+
+        let mut field = TissueField::new();
+        field.rebuild(&neurons);
+
+        // First, soften the tissue
+        for _ in 0..20 {
+            field.update_plasticity(&[true]);
+        }
+        let softened_r = field.resistance_values()[0];
+        assert!(softened_r < field.config().baseline_resistance,
+            "Should have softened after activity");
+
+        // Now let it stiffen back
+        for _ in 0..200 {
+            field.update_plasticity(&[false]);
+        }
+        let recovered_r = field.resistance_values()[0];
+        assert!(
+            (recovered_r - field.config().baseline_resistance).abs() < 0.01,
+            "Inactive tissue should stiffen back to baseline, got {} vs {}",
+            recovered_r, field.config().baseline_resistance
+        );
+    }
+
+    #[test]
+    fn test_rebuild_preserves_tissue_state() {
+        let neurons = vec![
+            SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]),
+            SpatialNeuron::pyramidal_at([1.0, 0.0, 0.0]),
+        ];
+
+        let mut field = TissueField::new();
+        field.rebuild(&neurons);
+
+        // Soften neuron 0
+        for _ in 0..10 {
+            field.update_plasticity(&[true, false]);
+        }
+        let r_before_rebuild = field.resistance_values()[0];
+
+        // Rebuild (simulating neurons moved)
+        field.rebuild(&neurons);
+
+        let r_after_rebuild = field.resistance_values()[0];
+        assert_eq!(r_before_rebuild, r_after_rebuild,
+            "Rebuild must preserve tissue state");
+    }
+
+    #[test]
+    fn test_resistance_field_interpolates_spatially() {
+        let neurons = vec![
+            SpatialNeuron::pyramidal_at([0.0, 0.0, 0.0]),
+            SpatialNeuron::pyramidal_at([1.0, 0.0, 0.0]),
+        ];
+
+        let mut field = TissueField::new();
+        field.rebuild(&neurons);
+
+        // Soften neuron 0 a lot, leave neuron 1 at baseline
+        for _ in 0..20 {
+            field.update_plasticity(&[true, false]);
+        }
+
+        let r_at_0 = field.resistance_at([0.0, 0.0, 0.0], &neurons);
+        let r_at_1 = field.resistance_at([1.0, 0.0, 0.0], &neurons);
+
+        assert!(r_at_0 < r_at_1,
+            "Resistance near active neuron ({:.3}) should be lower than near inactive ({:.3})",
+            r_at_0, r_at_1);
     }
 }

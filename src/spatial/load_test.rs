@@ -24,10 +24,11 @@
 mod tests {
     use crate::spatial::{
         Axon, CorrelationTracker, HubTracker, MigrationConfig, migrate_step,
-        MasteryConfig, MasteryState, PolarityChange,
         SpatialCascade, SpatialCascadeConfig, SpatialNeuron, SpatialSynapse,
         SpatialSynapseStore, TissueConfig, TissueField, detect_regions, RegionConfig,
+        SpatialRuntime, SpatialRuntimeConfig, WiringConfig, wire_by_proximity,
     };
+    use crate::spatial::snapshot::{SnapshotWriter, SnapshotRequest, SnapshotMetrics, snapshot_output_dir};
     use std::time::Instant;
 
     // ========================================================================
@@ -67,79 +68,73 @@ mod tests {
         }
     }
 
+    /// Deterministic pseudo-random float in [-1, 1] from a seed.
+    /// Simple hash-based scatter — no external deps needed.
+    fn scatter(seed: u64) -> f32 {
+        // xorshift-inspired hash
+        let mut x = seed.wrapping_mul(0x517cc1b727220a95);
+        x ^= x >> 17;
+        x = x.wrapping_mul(0x6c62272e07bb0142);
+        x ^= x >> 11;
+        // Map to [-1, 1]
+        ((x & 0xFFFF) as f32 / 32768.0) - 1.0
+    }
+
     /// Build a Hush-like spatial network for audio processing.
     ///
-    /// Neurons are placed in 3D space:
-    /// - Sensory neurons at x=0..13, y=0 (receive MFCC input)
-    /// - Interneurons at x=10..14, y=1..5 (spatial cloud)
-    /// - Motor neurons at x=20..25, y=0..2 (phoneme output)
+    /// Neurons are dispersed through continuous 3D space with random jitter:
+    /// - Sensory neurons: anchored near x=0..13, y~0 (receive MFCC input)
+    /// - Interneurons: scattered through x=5..18, y=0..6 (point cloud)
+    /// - Motor neurons: scattered through x=18..28, y=0..3
     ///
-    /// Synapses are created based on spatial proximity and convergent wiring,
+    /// Synapses are created based on convergent wiring patterns,
     /// NOT based on layer assignments.
     fn build_hush_network(config: &HushConfig) -> (Vec<SpatialNeuron>, SpatialSynapseStore) {
         let mut neurons = Vec::new();
 
-        // Sensory neurons: receive external MFCC input (arranged in a line)
+        // Sensory neurons: anchored along x-axis with mild y-jitter
+        // These need stable x-positions (channel identity) but can scatter in y/z
         for i in 0..config.mfcc_bins {
             let x = i as f32 * 0.5;
-            let mut n = SpatialNeuron::sensory_at([x, 0.0, 0.0], i as u16, 1);
-            n.axon = Axon::myelinated([x + 10.0, 1.0, 0.0], 150);
+            let jy = scatter(i as u64 * 3 + 1) * 0.3;
+            let jz = scatter(i as u64 * 3 + 2) * 0.2;
+            let mut n = SpatialNeuron::sensory_at([x, jy, jz], i as u16, 1);
+            n.axon = Axon::myelinated([x + 10.0, 1.0 + jy, jz], 150);
             neurons.push(n);
         }
-        let sensory_end = neurons.len();
-
-        // Interneurons: pyramidal cells in a spatial grid
+        // Interneurons: dispersed through a wide volume
+        // No grid — scattered through the processing region
         for i in 0..config.interneuron_count {
-            let x = 10.0 + (i % 8) as f32 * 0.5;
-            let y = 1.0 + (i / 8) as f32 * 0.5;
-            let mut n = SpatialNeuron::pyramidal_at([x, y, 0.0]);
-            n.axon = Axon::myelinated([x + 10.0, y, 0.0], 120);
+            let jx = scatter(i as u64 * 7 + 100);
+            let jy = scatter(i as u64 * 7 + 101);
+            let jz = scatter(i as u64 * 7 + 102);
+            let x = 5.0 + (i as f32 / config.interneuron_count as f32) * 13.0 + jx * 2.0;
+            let y = 0.5 + jy.abs() * 5.5; // spread vertically (0.5 to 6.0)
+            let z = jz * 1.0;
+            let axon_jx = scatter(i as u64 * 7 + 103) * 3.0;
+            let axon_jy = scatter(i as u64 * 7 + 104) * 2.0;
+            let mut n = SpatialNeuron::pyramidal_at([x, y, z]);
+            n.axon = Axon::myelinated([x + 8.0 + axon_jx, y + axon_jy, z], 120);
             neurons.push(n);
         }
-        let interneuron_end = neurons.len();
-
-        // Motor neurons: phoneme output interface
+        // Motor neurons: scattered through the output region
         for i in 0..config.motor_count {
-            let x = 20.0 + (i % 10) as f32 * 0.5;
-            let y = (i / 10) as f32 * 0.5;
-            neurons.push(SpatialNeuron::motor_at([x, y, 0.0], i as u16, 1));
+            let jx = scatter(i as u64 * 5 + 200) * 2.5;
+            let jy = scatter(i as u64 * 5 + 201) * 1.5;
+            let jz = scatter(i as u64 * 5 + 202) * 0.5;
+            let x = 20.0 + (i as f32 / config.motor_count as f32) * 6.0 + jx;
+            let y = 0.5 + jy.abs() * 2.0;
+            neurons.push(SpatialNeuron::motor_at([x, y, jz], i as u16, 1));
         }
 
-        // Create synapses based on convergent wiring patterns
-        let total = neurons.len();
-        let mut store = SpatialSynapseStore::new(total);
-
-        // Sensory → Interneurons (convergent: groups of sensory share interneuron targets)
-        for i in 0..config.mfcc_bins {
-            let src = i as u32;
-            let base_inter = (i / 4) % config.interneuron_count;
-
-            for j in 0..4 {
-                let target = (sensory_end + (base_inter + j * 8) % config.interneuron_count) as u32;
-                store.add(SpatialSynapse::excitatory(
-                    src,
-                    target,
-                    config.synapse_magnitude,
-                    300,
-                ));
-            }
-        }
-
-        // Interneurons → Motor (convergent: multiple interneurons drive each motor neuron)
-        for i in 0..config.interneuron_count {
-            let src = (sensory_end + i) as u32;
-            for j in 0..8 {
-                let target = (interneuron_end + (i * 7 + j * 11) % config.motor_count) as u32;
-                store.add(SpatialSynapse::excitatory(
-                    src,
-                    target,
-                    (config.synapse_magnitude as u16 * 80 / 100) as u8,
-                    300,
-                ));
-            }
-        }
-
-        store.rebuild_index(total);
+        // Wire by spatial proximity: axon terminals connect to nearby somas
+        let wiring = WiringConfig {
+            max_distance: 8.0,
+            max_fanout: 8,
+            max_fanin: 20,
+            default_magnitude: config.synapse_magnitude,
+        };
+        let store = wire_by_proximity(&neurons, &wiring);
         (neurons, store)
     }
 
@@ -150,26 +145,8 @@ mod tests {
         use_neighborhood: bool,
         time_us: u64,
     ) {
-        for (i, &coeff) in coefficients.iter().enumerate() {
-            if coeff.abs() < 0.1 {
-                continue; // Skip near-zero coefficients
-            }
-
-            // Scale coefficient to injection current
-            let current = (coeff * 2000.0) as i16;
-            cascade.inject(i as u32, current, time_us);
-
-            if use_neighborhood && coeff.abs() > 0.3 {
-                // Strong coefficients activate neighbors (coincidence detection)
-                let neighbor_current = (coeff * 1500.0) as i16;
-                if i > 0 {
-                    cascade.inject((i - 1) as u32, neighbor_current, time_us);
-                }
-                if i < coefficients.len() - 1 {
-                    cascade.inject((i + 1) as u32, neighbor_current, time_us);
-                }
-            }
-        }
+        let neighbor_threshold = if use_neighborhood { 0.3 } else { f32::MAX };
+        cascade.inject_sensory_scaled(coefficients, 2000.0, 1500.0, neighbor_threshold, 0.1, time_us);
     }
 
     /// Generate a synthetic MFCC frame (simulates audio feature extraction).
@@ -426,14 +403,9 @@ mod tests {
         let mut correlations = CorrelationTracker::new(neuron_count, 100, 10_000);
         let mut hub_tracker = HubTracker::new(neuron_count);
 
-        // Track hub connections from wiring
-        let sensory_end = config.mfcc_bins;
-        for i in 0..config.mfcc_bins {
-            let base_inter = (i / 4) % config.interneuron_count;
-            for j in 0..4 {
-                let target = (sensory_end + (base_inter + j * 8) % config.interneuron_count) as u32;
-                hub_tracker.record_connection(target);
-            }
+        // Track hub connections from actual wiring
+        for syn in cascade.synapses.iter() {
+            hub_tracker.record_connection(syn.target);
         }
 
         // Snapshot initial positions for migration displacement measurement
@@ -449,8 +421,15 @@ mod tests {
             min_distance: 0.3,
             max_step: 0.2,
             axon_elasticity: 0.8,
+            exclusion_radius: 0.3,
+            exclusion_strength: 2.0,
+            origin_spring: 0.05,
         };
         let mut migration_steps = 0usize;
+
+        // Tissue substrate — persistent resistance/conductivity field
+        let mut tissue = TissueField::with_config(TissueConfig::default());
+        tissue.rebuild(&cascade.neurons);
 
         let run_start = Instant::now();
 
@@ -464,7 +443,7 @@ mod tests {
             let mfcc = generate_mfcc_frame(frame, phoneme);
 
             inject_mfcc_frame(&mut cascade, &mfcc, true, time);
-            cascade.run_until(time + frame_interval);
+            cascade.run_until_with_tissue(time + frame_interval, &tissue);
 
             // Record spikes for correlation
             for (idx, neuron) in cascade.neurons.iter().enumerate() {
@@ -476,11 +455,20 @@ mod tests {
             // Migration: let neurons physically move toward correlated partners
             // Run every 100 frames (~1 second of simulated time)
             if frame % 100 == 99 {
+                // Tissue plasticity: active neurons soften local tissue
+                let active_mask: Vec<bool> = cascade.neurons.iter()
+                    .map(|n| n.last_spike_us > time.saturating_sub(1_000_000))
+                    .collect();
+                tissue.update_plasticity(&active_mask);
+                tissue.rebuild(&cascade.neurons);
+
                 migrate_step(
                     &mut cascade.neurons,
                     &correlations,
                     &migration_config,
                     time,
+                    Some(&initial_positions),
+                    Some(&tissue),
                 );
                 migration_steps += 1;
             }
@@ -573,6 +561,8 @@ mod tests {
         println!("    Total events:   {:>8}", cascade.total_events());
         println!("    Spikes/sec:     {:>8.0}", spikes_per_second);
         println!("    Events/sec:     {:>8.0}", events_per_second);
+        println!("    Coincidence:    {:>8}", cascade.coincidence_events);
+        println!("    Tissue atten:   {:>8}", cascade.tissue_attenuated);
 
         println!("\n  SPATIAL UTILIZATION (by neuron role)");
         println!("  ------------------------------------");
@@ -865,65 +855,56 @@ mod tests {
         let synapse_count = synapses.len();
         let setup_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
 
-        let cascade_config = SpatialCascadeConfig {
-            max_events_per_call: 50_000,
+        let runtime_config = SpatialRuntimeConfig {
+            cascade: SpatialCascadeConfig {
+                max_events_per_call: 50_000,
+                ..Default::default()
+            },
             ..Default::default()
         };
-        let mut cascade = SpatialCascade::with_network(neurons, synapses, cascade_config);
-        let mut correlations = CorrelationTracker::new(neuron_count, 100, 10_000);
-
-        // Snapshot initial positions for migration
-        let initial_positions: Vec<[f32; 3]> = cascade.neurons.iter()
-            .map(|n| n.soma.position).collect();
-
-        let migration_config = MigrationConfig {
-            migration_rate: 0.05,
-            correlation_threshold: 0.2,
-            attraction_strength: 0.5,
-            repulsion_strength: 0.3,
-            min_distance: 0.3,
-            max_step: 0.2,
-            axon_elasticity: 0.8,
-        };
-        let mut migration_steps = 0usize;
-
-        // Mastery learning state
-        let mastery_config = MasteryConfig {
-            pressure_threshold: 20,        // Aggressive: fast response to co-firing
-            participation_threshold: 0.15,  // Top 85% participate
-            magnitude_cost: 3,
-            flip_penalty: 40,
-            pressure_scale: 2.5,           // Strong pressure amplification
-            hub_threshold: 15,
-            hub_decay_rate: 0.1,
-            flip_cooldown_us: 50_000,      // 50ms between flips
-        };
-        let mut mastery = MasteryState::new(synapse_count, mastery_config, 10_000);
-        let mut hub_tracker = HubTracker::new(neuron_count);
-
-        // Initialize hub tracker with existing connectivity
-        for syn in cascade.synapses.iter() {
-            hub_tracker.record_connection(syn.target);
-        }
-
-        // Learning counters
-        let mut total_strengthened = 0u32;
-        let mut total_weakened = 0u32;
-        let mut total_dormant = 0u32;
-        let mut total_awakened = 0u32;
-        let mut total_flipped = 0u32;
-        let mut learning_cycles = 0u32;
+        let mut runtime = SpatialRuntime::new(neurons, synapses, runtime_config);
 
         // Snapshot initial mean magnitude for comparison
-        let initial_mean_mag: f32 = cascade.synapses.iter()
+        let initial_mean_mag: f32 = runtime.cascade.synapses.iter()
             .map(|s| s.signal.magnitude as f32).sum::<f32>() / synapse_count as f32;
 
-        // === ASCII SNAPSHOT: BEFORE ===
-        render_ascii_field(&cascade.neurons, "BEFORE — Initial Positions (all silent)");
+        // === PNG SNAPSHOT WRITER (10 snapshots: before + 8 during + after) ===
+        let snapshot_writer = SnapshotWriter::spawn(snapshot_output_dir());
+        let mut snapshot_seq = 0u32;
+        let total_snapshots = 10usize;
+        // Utterance indices at which to take snapshots (evenly spaced)
+        let snapshot_at: Vec<usize> = (1..total_snapshots - 1)
+            .map(|i| (i * n_utterances) / (total_snapshots - 1))
+            .collect();
 
-        // Process real utterances
+        // === ASCII + PNG SNAPSHOT: BEFORE ===
+        render_ascii_field(&runtime.cascade.neurons, "BEFORE — Initial Positions (all silent)");
+        snapshot_writer.queue(SnapshotRequest {
+            label: "BEFORE".into(),
+            seq: snapshot_seq,
+            neurons: runtime.cascade.neurons.clone(),
+            metrics: SnapshotMetrics {
+                sim_time_us: 0,
+                wall_clock_ms: setup_start.elapsed().as_secs_f64() * 1000.0,
+                neuron_count,
+                synapse_count,
+                total_spikes: 0,
+                total_events: 0,
+                sensory_util: 0.0,
+                inter_util: 0.0,
+                motor_util: 0.0,
+                learning_cycles: 0,
+                total_strengthened: 0,
+                total_weakened: 0,
+                total_dormant: 0,
+                mean_displacement: 0.0,
+                region_count: 0,
+            },
+        });
+        snapshot_seq += 1;
+
+        // Process real utterances via SpatialRuntime
         let run_start = Instant::now();
-        let mut time = 0u64;
         let frame_interval = 10_000u64; // 10ms per MFCC frame
         let mut total_frames = 0usize;
         let mut total_audio_seconds = 0.0f64;
@@ -954,105 +935,68 @@ mod tests {
 
             for frame_idx in 0..sample.n_frames {
                 sample.frame_f32(frame_idx, &mut mfcc_buf);
-                inject_mfcc_frame(&mut cascade, &mfcc_buf, true, time);
-                cascade.run_until(time + frame_interval);
-
-                // Record spikes
-                for (idx, neuron) in cascade.neurons.iter().enumerate() {
-                    if neuron.last_spike_us > time.saturating_sub(frame_interval) {
-                        correlations.record_spike(idx, neuron.last_spike_us);
-                    }
-                }
-
-                // Mastery learning every ~50ms (5 frames) — aggressive cycle
-                if total_frames % 5 == 4 {
-                    mastery.set_time(time);
-                    let learning_window = 100_000u64; // 100ms co-firing window
-
-                    // Phase 1: Sub-threshold aware Hebbian pressure
-                    // Collect synapse info first (source, target) to avoid borrow conflict
-                    let syn_info: Vec<(u32, u32)> = cascade.synapses.iter()
-                        .map(|s| (s.source, s.target)).collect();
-
-                    for (syn_idx, &(src, tgt)) in syn_info.iter().enumerate() {
-                        let src_fired = cascade.neurons[src as usize].last_spike_us
-                            > time.saturating_sub(learning_window);
-                        let tgt_fired = cascade.neurons[tgt as usize].last_spike_us
-                            > time.saturating_sub(learning_window);
-
-                        if src_fired {
-                            let activity = cascade.neurons[src as usize].trace as f32 / 255.0;
-                            // Sub-threshold aware Hebbian:
-                            //   co-fire → full strengthen
-                            //   target depolarized but sub-threshold → gentle strengthen
-                            //   target at resting → weaken
-                            let tgt_membrane = cascade.neurons[tgt as usize].membrane;
-                            let (direction, eff_activity): (i8, f32) = if tgt_fired {
-                                (1, activity)
-                            } else if tgt_membrane > -6500 {
-                                // Sub-threshold depolarization — weak positive signal
-                                // This breaks the chicken-and-egg: motor can't fire until
-                                // synapses strengthen, but synapses weaken without motor firing.
-                                (1, activity * 0.3)
-                            } else {
-                                (-1, activity)
-                            };
-                            mastery.accumulate_pressure(syn_idx, eff_activity, direction);
-                            hub_tracker.record_activation(tgt, 1);
-                        }
-                    }
-
-                    // Phase 2: Apply hub pressure (weaken synapses targeting hubs)
-                    let hub_targets = hub_tracker.hub_synapses_to_weaken(mastery_config.hub_threshold);
-                    for (syn_idx, &(_, tgt)) in syn_info.iter().enumerate() {
-                        if hub_targets.contains(&tgt) {
-                            mastery.accumulate_pressure(syn_idx, 0.5, -1);
-                        }
-                    }
-
-                    // Phase 3: Apply learning to all synapses
-                    for (syn_idx, syn) in cascade.synapses.iter_mut().enumerate() {
-                        if let Some(change) = mastery.apply_learning(syn_idx, syn) {
-                            match change {
-                                PolarityChange::Strengthened => total_strengthened += 1,
-                                PolarityChange::Weakened => total_weakened += 1,
-                                PolarityChange::GoneDormant => total_dormant += 1,
-                                PolarityChange::Awakened => total_awakened += 1,
-                                PolarityChange::Flipped => total_flipped += 1,
-                            }
-                        }
-                    }
-
-                    hub_tracker.clear_activation();
-                    mastery.add_budget(200); // Generous budget for aggressive mastery
-                    learning_cycles += 1;
-                }
-
-                // Migration every ~1 second of audio
-                if total_frames % 100 == 99 {
-                    migrate_step(
-                        &mut cascade.neurons,
-                        &correlations,
-                        &migration_config,
-                        time,
-                    );
-                    migration_steps += 1;
-                }
-
-                time += frame_interval;
+                runtime.inject_sensory_scaled(&mfcc_buf, 2000.0, 1500.0, 0.3, 0.1);
+                runtime.step(frame_interval);
                 total_frames += 1;
             }
 
-            // === ASCII SNAPSHOT: MIDPOINT ===
-            if utt_idx + 1 == n_utterances / 2 {
-                let mid_label = format!("MIDPOINT — After {} utterances ({:.0}s audio)",
-                    utt_idx + 1, total_audio_seconds);
-                render_ascii_field(&cascade.neurons, &mid_label);
+            // === PERIODIC PNG SNAPSHOTS (8 evenly spaced during run) ===
+            if snapshot_at.contains(&(utt_idx + 1)) {
+                let snap_label = format!("UTT_{}", utt_idx + 1);
+                let (su, iu, mu) = role_utilization(&runtime.cascade);
+                let mut snap_disp = 0.0f32;
+                for (i, neuron) in runtime.cascade.neurons.iter().enumerate() {
+                    let dx = neuron.soma.position[0] - runtime.initial_positions()[i][0];
+                    let dy = neuron.soma.position[1] - runtime.initial_positions()[i][1];
+                    let dz = neuron.soma.position[2] - runtime.initial_positions()[i][2];
+                    snap_disp += (dx * dx + dy * dy + dz * dz).sqrt();
+                }
+                snap_disp /= neuron_count as f32;
+                snapshot_writer.queue(SnapshotRequest {
+                    label: snap_label,
+                    seq: snapshot_seq,
+                    neurons: runtime.cascade.neurons.clone(),
+                    metrics: SnapshotMetrics {
+                        sim_time_us: runtime.time_us(),
+                        wall_clock_ms: run_start.elapsed().as_secs_f64() * 1000.0,
+                        neuron_count: runtime.cascade.neurons.len(),
+                        synapse_count: runtime.cascade.synapses.len(),
+                        total_spikes: runtime.cascade.total_spikes(),
+                        total_events: runtime.cascade.total_events(),
+                        sensory_util: su,
+                        inter_util: iu,
+                        motor_util: mu,
+                        learning_cycles: runtime.learning.cycles,
+                        total_strengthened: runtime.learning.strengthened,
+                        total_weakened: runtime.learning.weakened,
+                        total_dormant: runtime.learning.dormant,
+                        mean_displacement: snap_disp,
+                        region_count: 0,
+                    },
+                });
+                snapshot_seq += 1;
             }
         }
 
         let run_ms = run_start.elapsed().as_secs_f64() * 1000.0;
         let total_ms = setup_start.elapsed().as_secs_f64() * 1000.0;
+
+        // Aliases for diagnostic access (avoids changing every reference below)
+        let time = runtime.time_us();
+        let correlations = runtime.correlations();
+        let initial_positions = runtime.initial_positions();
+        let cascade = &runtime.cascade;
+        let tissue = runtime.tissue();
+        let learning_cycles = runtime.learning.cycles;
+        let total_strengthened = runtime.learning.strengthened;
+        let total_weakened = runtime.learning.weakened;
+        let total_dormant = runtime.learning.dormant;
+        let total_awakened = runtime.learning.awakened;
+        let total_flipped = runtime.learning.flipped;
+        let migration_steps = runtime.structural.migration_steps;
+        let tissue_updates = runtime.structural.tissue_updates;
+        let total_pruning_cycles = runtime.structural.pruning_cycles;
+        let total_hard_pruned = runtime.structural.hard_pruned;
 
         // === ASCII SNAPSHOT: AFTER ===
         let after_label = format!("AFTER — {} utterances, {} learning cycles",
@@ -1061,11 +1005,11 @@ mod tests {
 
         // Metrics
         let simulated_s = time as f64 / 1_000_000.0;
-        let (sensory_util, inter_util, motor_util) = role_utilization(&cascade);
+        let (sensory_util, inter_util, motor_util) = role_utilization(cascade);
 
         // Regions
         let regions = detect_regions(
-            &cascade.neurons, Some(&correlations), time, &RegionConfig::default());
+            &cascade.neurons, Some(correlations), time, &RegionConfig::default());
 
         // Cross-region correlations
         let mut cross_region_corrs: Vec<(u32, u32, f32)> = Vec::new();
@@ -1073,7 +1017,7 @@ mod tests {
             for j in (i+1)..regions.len() {
                 let sa: Vec<usize> = regions[i].neurons.iter().take(20).map(|&n| n as usize).collect();
                 let sb: Vec<usize> = regions[j].neurons.iter().take(20).map(|&n| n as usize).collect();
-                let corr = mean_correlation(&correlations, &sa, &sb, time);
+                let corr = mean_correlation(correlations, &sa, &sb, time);
                 cross_region_corrs.push((regions[i].id, regions[j].id, corr));
             }
         }
@@ -1090,6 +1034,31 @@ mod tests {
             if dist > max_displacement { max_displacement = dist; }
         }
         let mean_displacement = total_displacement / neuron_count as f32;
+
+        // === PNG SNAPSHOT: AFTER ===
+        snapshot_writer.queue(SnapshotRequest {
+            label: "AFTER".into(),
+            seq: snapshot_seq,
+            neurons: cascade.neurons.clone(),
+            metrics: SnapshotMetrics {
+                sim_time_us: time,
+                wall_clock_ms: run_start.elapsed().as_secs_f64() * 1000.0,
+                neuron_count: cascade.neurons.len(),
+                synapse_count: cascade.synapses.len(),
+                total_spikes: cascade.total_spikes(),
+                total_events: cascade.total_events(),
+                sensory_util,
+                inter_util,
+                motor_util,
+                learning_cycles,
+                total_strengthened,
+                total_weakened,
+                total_dormant,
+                mean_displacement,
+                region_count: regions.len(),
+            },
+        });
+        snapshot_writer.finish(); // Wait for all PNGs to be written
 
         // Memory
         let neuron_size = std::mem::size_of::<SpatialNeuron>();
@@ -1119,6 +1088,8 @@ mod tests {
         println!("    Total events:    {:>8}", cascade.total_events());
         println!("    Spikes/sec:      {:>8.0}", cascade.total_spikes() as f64 / simulated_s);
         println!("    Events/sec:      {:>8.0}", cascade.total_events() as f64 / simulated_s);
+        println!("    Coincidence:     {:>8}", cascade.coincidence_events);
+        println!("    Tissue atten:    {:>8}", cascade.tissue_attenuated);
 
         println!("\n  SPATIAL UTILIZATION (by neuron role)");
         println!("  ------------------------------------");
@@ -1149,6 +1120,125 @@ mod tests {
         println!("    Mean displacement:{:>6.3} units", mean_displacement);
         println!("    Max displacement: {:>6.3} units", max_displacement);
 
+        // Tissue substrate diagnostics
+        println!("\n  TISSUE SUBSTRATE");
+        println!("  -----------------");
+        println!("    Plasticity updates: {:>5}", tissue_updates);
+        let res = tissue.resistance_values();
+        let cond = tissue.conductivity_values();
+        if !res.is_empty() {
+            let mean_r: f32 = res.iter().sum::<f32>() / res.len() as f32;
+            let min_r = res.iter().copied().fold(f32::MAX, f32::min);
+            let max_r = res.iter().copied().fold(f32::MIN, f32::max);
+            let mean_c: f32 = cond.iter().sum::<f32>() / cond.len() as f32;
+            let min_c = cond.iter().copied().fold(f32::MAX, f32::min);
+            let max_c = cond.iter().copied().fold(f32::MIN, f32::max);
+            println!("    Resistance:    mean={:.3}  min={:.3}  max={:.3}  (baseline={})",
+                mean_r, min_r, max_r, tissue.config().baseline_resistance);
+            println!("    Conductivity:  mean={:.3}  min={:.3}  max={:.3}  (baseline={})",
+                mean_c, min_c, max_c, tissue.config().baseline_conductivity);
+
+            // Per-role tissue stats
+            let sensory_end = config.mfcc_bins;
+            let inter_end = sensory_end + config.interneuron_count;
+            let (mut sr, mut sc) = (0.0f32, 0.0f32);
+            let (mut ir, mut ic) = (0.0f32, 0.0f32);
+            let (mut mr, mut mc) = (0.0f32, 0.0f32);
+            for i in 0..res.len() {
+                if i < sensory_end { sr += res[i]; sc += cond[i]; }
+                else if i < inter_end { ir += res[i]; ic += cond[i]; }
+                else { mr += res[i]; mc += cond[i]; }
+            }
+            let sn = config.mfcc_bins as f32;
+            let inn = config.interneuron_count as f32;
+            let mn = config.motor_count as f32;
+            println!("    Sensory:  R={:.3}  C={:.3}", sr / sn, sc / sn);
+            println!("    Inter:    R={:.3}  C={:.3}", ir / inn, ic / inn);
+            println!("    Motor:    R={:.3}  C={:.3}", mr / mn, mc / mn);
+        }
+
+        // Pruning diagnostics
+        println!("\n  STRUCTURAL PRUNING");
+        println!("  -------------------");
+        println!("    Pruning cycles:  {:>8}", total_pruning_cycles);
+        println!("    Hard pruned:     {:>8} (removed from store)", total_hard_pruned);
+        println!("    Active synapses: {:>8}", cascade.synapses.len());
+        println!("    Dormant synapses:{:>8}", cascade.synapses.count_dormant());
+        println!("    Started with:    {:>8} synapses", synapse_count);
+
+        // Motor neuron outlier diagnostic — find motors that migrated far from their origin
+        println!("\n  MOTOR NEURON OUTLIER ANALYSIS");
+        println!("  ------------------------------");
+        let sensory_end = config.mfcc_bins;
+        let inter_end = sensory_end + config.interneuron_count;
+        let motor_start = inter_end;
+
+        // Collect motor displacement + stats, sort by displacement descending
+        let mut motor_stats: Vec<(usize, f32, [f32; 3], [f32; 3], u64, i16)> = Vec::new();
+        for i in motor_start..neuron_count {
+            let n = &cascade.neurons[i];
+            let dx = n.soma.position[0] - initial_positions[i][0];
+            let dy = n.soma.position[1] - initial_positions[i][1];
+            let dz = n.soma.position[2] - initial_positions[i][2];
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+            motor_stats.push((i, dist, initial_positions[i], n.soma.position, n.last_spike_us, n.membrane));
+        }
+        motor_stats.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+        // Print top 5 most displaced motors
+        for (rank, &(idx, dist, orig, pos, last_spike, membrane)) in motor_stats.iter().take(5).enumerate() {
+            let fired = last_spike > 0;
+            // Count incoming synapses and their magnitudes
+            let mut in_count = 0u32;
+            let mut in_mag_sum = 0u32;
+            let mut in_at_cap = 0u32;
+            let mut presynaptic_roles: [u32; 3] = [0; 3]; // [sensory, inter, motor]
+            for syn in cascade.synapses.iter() {
+                if syn.target == idx as u32 {
+                    in_count += 1;
+                    in_mag_sum += syn.signal.magnitude as u32;
+                    if syn.signal.magnitude == 255 { in_at_cap += 1; }
+                    let src = syn.source as usize;
+                    if src < sensory_end {
+                        presynaptic_roles[0] += 1;
+                    } else if src < inter_end {
+                        presynaptic_roles[1] += 1;
+                    } else {
+                        presynaptic_roles[2] += 1;
+                    }
+                }
+            }
+            let in_mean_mag = if in_count > 0 { in_mag_sum as f32 / in_count as f32 } else { 0.0 };
+
+            // Correlation with top partners
+            let top_corr_partners = correlations.correlated_partners(idx, 0.1, time);
+            let top3: Vec<(usize, f32)> = {
+                let mut sorted = top_corr_partners;
+                sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                sorted.into_iter().take(3).collect()
+            };
+
+            println!("    #{} Motor[{}]: displacement={:.2} units  {}",
+                rank + 1, idx, dist, if fired { "FIRED" } else { "silent" });
+            println!("        Origin: ({:.1}, {:.1}, {:.1}) → Now: ({:.1}, {:.1}, {:.1})",
+                orig[0], orig[1], orig[2], pos[0], pos[1], pos[2]);
+            println!("        Membrane: {}  Last spike: {}us",
+                membrane, last_spike);
+            println!("        Incoming: {} synapses (mean mag {:.1}, {} at cap)",
+                in_count, in_mean_mag, in_at_cap);
+            println!("        Presynaptic: {} sensory, {} inter, {} motor",
+                presynaptic_roles[0], presynaptic_roles[1], presynaptic_roles[2]);
+            if !top3.is_empty() {
+                let partner_strs: Vec<String> = top3.iter().map(|(pid, c)| {
+                    let role = if *pid < sensory_end { "S" }
+                        else if *pid < inter_end { "I" }
+                        else { "M" };
+                    format!("{}[{}]={:.3}", role, pid, c)
+                }).collect();
+                println!("        Top correlated: {}", partner_strs.join(", "));
+            }
+        }
+
         // Mastery learning metrics
         let final_mean_mag: f32 = cascade.synapses.iter()
             .map(|s| s.signal.magnitude as f32).sum::<f32>() / synapse_count as f32;
@@ -1165,7 +1255,6 @@ mod tests {
         println!("    Gone dormant:    {:>8}", total_dormant);
         println!("    Awakened:        {:>8}", total_awakened);
         println!("    Flipped:         {:>8}", total_flipped);
-        println!("    Budget remaining:{:>8}", mastery.budget());
         println!("    Mean magnitude:  {:>8.1} → {:.1} ({:+.1})",
             initial_mean_mag, final_mean_mag, final_mean_mag - initial_mean_mag);
         println!("    Active synapses: {:>8}/{}", active_synapses, synapse_count);

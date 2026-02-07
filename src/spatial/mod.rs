@@ -51,13 +51,17 @@ mod synapse;
 mod cascade;
 mod migration;
 mod pruning;
+mod runtime;
 mod tissue;
+mod wiring;
 
 // === Integration Tests ===
 #[cfg(test)]
 mod integration_test;
 #[cfg(test)]
 mod load_test;
+#[cfg(test)]
+mod snapshot;
 
 // === Core Exports ===
 pub use anatomy::{Axon, Dendrite, Soma};
@@ -74,7 +78,9 @@ pub use synapse::{SpatialSynapse, SpatialSynapseStore};
 // === Execution Exports ===
 pub use cascade::{SpatialCascade, SpatialCascadeConfig, SpikeArrival};
 pub use migration::{MigrationConfig, CorrelationTracker, CorrelationEntry, compute_migration_forces, apply_migration, migrate_step};
-pub use pruning::{PruningConfig, PruningResult, DormancyTracker, pruning_cycle, hard_prune, soft_prune};
+pub use pruning::{PruningConfig, PruningResult, DormancyTracker, pruning_cycle, hard_prune};
+pub use runtime::{SpatialRuntime, SpatialRuntimeConfig, LearningCounters, StructuralCounters};
+pub use wiring::{WiringConfig, wire_by_proximity};
 pub use tissue::{
     TissueField, TissueConfig, TissueType,
     SpatialHash, GridKey, AxonSegment,
