@@ -30,6 +30,7 @@ pub mod plasticity;
 pub mod codec;
 pub mod stats;
 pub mod density;
+pub mod template;
 
 pub use binding::{BindingConfig, BindingTable};
 pub use io::{NeuronIO, NullIO};
@@ -38,4 +39,5 @@ pub use synapse::{Synapse, SynapseStore, ThermalState};
 pub use pool::{BindingSpec, EvolutionConfig, EvolutionResult, FitnessInput, GrowthConfig, MutationEntry, MutationJournal, MutationType, NeuronPool, PoolCheckpoint, PoolConfig, SpatialDims, TypeDistributionSpec};
 pub use plasticity::GrowthResult;
 pub use stats::{PoolStats, ThermalDistribution, TypeDistribution};
-pub use density::DensityField;
+pub use density::{Conductivity, DensityField, TissueType};
+pub use template::{SignalType, TemplateType, TemplateRequest, TemplateInstance, TemplateRegistry, SpatialArrangement};

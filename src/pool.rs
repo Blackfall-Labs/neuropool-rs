@@ -11,6 +11,7 @@ use crate::binding::BindingTable;
 use crate::io::{NeuronIO, NullIO};
 use crate::neuron::{NeuronArrays, NeuronType, flags};
 use crate::synapse::{Synapse, SynapseStore};
+use crate::template::{SignalType, TemplateType, TemplateRequest, TemplateInstance, TemplateRegistry};
 
 /// 3D spatial dimensions for a neuron pool grid.
 ///
@@ -536,6 +537,10 @@ pub struct NeuronPool {
     pub generation: u32,
     /// Journal of recent structural mutations for tracking evolution history.
     pub journal: MutationJournal,
+    /// Template registry for computational circuit motifs.
+    pub templates: TemplateRegistry,
+    /// Spatial bounds for template placement (set by init_spatial).
+    pub spatial_bounds: Option<[f32; 3]>,
 }
 
 impl NeuronPool {
@@ -578,6 +583,8 @@ impl NeuronPool {
             chem_exposure: vec![0u8; n_neurons as usize],
             generation: 0,
             journal: MutationJournal::new(16),
+            templates: TemplateRegistry::new(),
+            spatial_bounds: None,
         }
     }
 
@@ -2026,6 +2033,7 @@ impl NeuronPool {
     /// Must be called after pool creation to enable spatial operations.
     pub fn init_spatial(&mut self, bounds: [f32; 3]) {
         self.neurons.init_spatial_from_grid(bounds, (self.dims.w, self.dims.h, self.dims.d));
+        self.spatial_bounds = Some(bounds);
     }
 
     /// Initialize spatial positions with random jitter.
@@ -2161,6 +2169,1096 @@ impl NeuronPool {
         // Note: excitatory/inhibitory counts need recomputation if precise tracking needed
 
         count
+    }
+
+    // =========================================================================
+    // v4: Template System (Computational Circuit Motifs)
+    // =========================================================================
+
+    /// Request a template instantiation.
+    ///
+    /// The template is spawned at the hint position (or auto-placed in low-density
+    /// area if None). Returns the template instance ID, or None if spawn failed.
+    pub fn spawn_template(&mut self, request: TemplateRequest, seed: u64) -> Option<u32> {
+        let bounds = self.spatial_bounds?;
+
+        // Find spawn position
+        let centroid = match request.position_hint {
+            Some(pos) => pos,
+            None => self.find_low_density_position(bounds, seed)?,
+        };
+
+        // Get neuron type distribution for this template (for future use)
+        let (_n_comp, _n_gate, _n_osc, _n_mem, _n_sens, _n_mot) = request.template_type.type_distribution();
+        let total_neurons = request.template_type.neuron_count();
+
+        if total_neurons == 0 {
+            return None;
+        }
+
+        // Record starting index for new neurons
+        let start_idx = self.neurons.len();
+
+        // Spawn neurons based on template type
+        let mut neuron_indices = Vec::with_capacity(total_neurons);
+        let mut rng = seed;
+
+        // Helper for LCG random
+        let mut next_rand = || -> f32 {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((rng >> 32) as u32) as f32 / u32::MAX as f32
+        };
+
+        // Spawn arrangement depends on template type
+        match request.template_type {
+            TemplateType::LateralInhibition { scale, surround_ratio } => {
+                // Center neurons in a cluster
+                for i in 0..scale {
+                    let offset = [
+                        (next_rand() - 0.5) * 0.5,
+                        (next_rand() - 0.5) * 0.5,
+                        (next_rand() - 0.5) * 0.5,
+                    ];
+                    let pos = [
+                        centroid[0] + offset[0],
+                        centroid[1] + offset[1],
+                        centroid[2] + offset[2],
+                    ];
+                    self.spawn_neuron_at(pos, NeuronType::Computational);
+                    neuron_indices.push(start_idx + i as usize);
+                }
+
+                // Gate neurons surrounding each center
+                for i in 0..scale {
+                    let center_pos = self.neurons.soma_position[start_idx + i as usize];
+                    for j in 0..surround_ratio {
+                        let angle = (j as f32 / surround_ratio as f32) * std::f32::consts::TAU;
+                        let radius = 0.3;
+                        let pos = [
+                            center_pos[0] + angle.cos() * radius,
+                            center_pos[1] + angle.sin() * radius,
+                            center_pos[2],
+                        ];
+                        self.spawn_neuron_at(pos, NeuronType::Gate);
+                        neuron_indices.push(self.neurons.len() - 1);
+                    }
+                }
+            }
+
+            TemplateType::AttractorMemory { capacity } => {
+                // Memory neurons in a compact cluster
+                for i in 0..capacity {
+                    let offset = [
+                        (next_rand() - 0.5) * 0.4,
+                        (next_rand() - 0.5) * 0.4,
+                        (next_rand() - 0.5) * 0.4,
+                    ];
+                    let pos = [
+                        centroid[0] + offset[0],
+                        centroid[1] + offset[1],
+                        centroid[2] + offset[2],
+                    ];
+                    self.spawn_neuron_at(pos, NeuronType::MemoryReader);
+                    neuron_indices.push(start_idx + i as usize);
+                }
+            }
+
+            TemplateType::TemporalChain { length } => {
+                // Chain neurons in a line
+                let step = 0.2;
+                let direction = [1.0f32, 0.0, 0.0]; // Default: extend in X
+                for i in 0..length {
+                    let pos = [
+                        centroid[0] + direction[0] * step * i as f32,
+                        centroid[1] + direction[1] * step * i as f32,
+                        centroid[2] + direction[2] * step * i as f32,
+                    ];
+                    self.spawn_neuron_at(pos, NeuronType::Computational);
+                    neuron_indices.push(start_idx + i as usize);
+                }
+                // Gate neuron at end for control
+                let gate_pos = [
+                    centroid[0] + direction[0] * step * length as f32,
+                    centroid[1] + direction[1] * step * length as f32,
+                    centroid[2] + direction[2] * step * length as f32,
+                ];
+                self.spawn_neuron_at(gate_pos, NeuronType::Gate);
+                neuron_indices.push(self.neurons.len() - 1);
+            }
+
+            TemplateType::OscillatorNetwork { follower_count, .. } => {
+                // Pacemaker at center
+                self.spawn_neuron_at(centroid, NeuronType::Oscillator);
+                neuron_indices.push(start_idx);
+
+                // Followers in a sphere around pacemaker
+                for i in 0..follower_count {
+                    let theta = next_rand() * std::f32::consts::TAU;
+                    let phi = (next_rand() * 2.0 - 1.0).acos();
+                    let r = 0.3 + next_rand() * 0.2;
+                    let pos = [
+                        centroid[0] + r * phi.sin() * theta.cos(),
+                        centroid[1] + r * phi.sin() * theta.sin(),
+                        centroid[2] + r * phi.cos(),
+                    ];
+                    self.spawn_neuron_at(pos, NeuronType::Computational);
+                    neuron_indices.push(start_idx + 1 + i as usize);
+                }
+            }
+
+            TemplateType::DisinhibitionGate => {
+                // Two gate neurons close together
+                self.spawn_neuron_at(centroid, NeuronType::Gate);
+                neuron_indices.push(start_idx);
+                let pos2 = [centroid[0] + 0.1, centroid[1], centroid[2]];
+                self.spawn_neuron_at(pos2, NeuronType::Gate);
+                neuron_indices.push(start_idx + 1);
+            }
+
+            TemplateType::WinnerTakeAll { competitors } => {
+                // Competitors in a ring, each with inhibitory partner
+                for i in 0..competitors {
+                    let angle = (i as f32 / competitors as f32) * std::f32::consts::TAU;
+                    let r = 0.3;
+                    let pos = [
+                        centroid[0] + r * angle.cos(),
+                        centroid[1] + r * angle.sin(),
+                        centroid[2],
+                    ];
+                    self.spawn_neuron_at(pos, NeuronType::Computational);
+                    neuron_indices.push(start_idx + (i * 2) as usize);
+
+                    // Inhibitory partner slightly inside
+                    let inh_pos = [
+                        centroid[0] + (r * 0.7) * angle.cos(),
+                        centroid[1] + (r * 0.7) * angle.sin(),
+                        centroid[2],
+                    ];
+                    self.spawn_neuron_at(inh_pos, NeuronType::Gate);
+                    neuron_indices.push(start_idx + (i * 2 + 1) as usize);
+                }
+            }
+
+            TemplateType::SensoryArray { dimensions } => {
+                // Sensory neurons in a line - like a cochlea or retina strip
+                // Each position corresponds to one input dimension
+                // Neuron at index i responds to input value i
+                let step = 0.05; // Spacing between neurons
+                let neurons_per_row = 16u16;
+                for i in 0..dimensions {
+                    let row = i / neurons_per_row;
+                    let col = i % neurons_per_row;
+                    let pos = [
+                        centroid[0] + (col as f32 - neurons_per_row as f32 / 2.0) * step,
+                        centroid[1] + (row as f32) * step,
+                        centroid[2],
+                    ];
+                    self.spawn_neuron_at(pos, NeuronType::Sensory);
+                    neuron_indices.push(start_idx + i as usize);
+                }
+            }
+        }
+
+        // Create and register the template instance
+        let instance = TemplateInstance::new(
+            0, // ID assigned by registry
+            request.template_type,
+            neuron_indices,
+            centroid,
+            request.input_signal,
+            request.output_signal,
+        );
+
+        let id = self.templates.register(instance);
+        Some(id)
+    }
+
+    /// Spawn a single neuron at the given position with the given type.
+    fn spawn_neuron_at(&mut self, pos: [f32; 3], ntype: NeuronType) {
+        // Extend neurons array
+        let is_excitatory = ntype != NeuronType::Gate; // Gates are inhibitory
+        let n_exc = if is_excitatory { 1 } else { 0 };
+        self.neurons.extend(1, n_exc, self.config.resting_potential, self.config.spike_threshold);
+
+        let idx = self.neurons.len() - 1;
+
+        // Set position
+        self.neurons.soma_position[idx] = pos;
+        self.neurons.axon_terminal[idx] = pos; // Starts at soma
+
+        // Set neuron type in flags
+        let mut f = self.neurons.flags[idx];
+        f &= 0b00000111; // Clear type bits
+        f |= (ntype as u8) << 3;
+        self.neurons.flags[idx] = f;
+
+        // Extend auxiliary arrays
+        self.synaptic_current.push(0);
+        self.projection_current.push(0);
+        self.spike_rate.push(0);
+        self.spike_window.push(false);
+        self.spike_window_count.push(0);
+        self.spike_counts.push(0);
+        self.chem_exposure.push(0);
+        self.delay_buf.extend(1);
+
+        // Extend synapse store to cover new neuron
+        self.synapses.extend(1);
+
+        // Update counts
+        self.n_neurons = self.neurons.len() as u32;
+        if is_excitatory {
+            self.n_excitatory += 1;
+        } else {
+            self.n_inhibitory += 1;
+        }
+    }
+
+    /// Find a low-density position for template placement.
+    fn find_low_density_position(&self, bounds: [f32; 3], seed: u64) -> Option<[f32; 3]> {
+        // Sample random positions and pick the one with lowest density
+        let mut rng = seed;
+        let mut best_pos = [bounds[0] / 2.0, bounds[1] / 2.0, bounds[2] / 2.0];
+        let mut best_density = f32::MAX;
+
+        for _ in 0..16 {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let rx = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let ry = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+            let rz = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
+
+            let pos = [bounds[0] * rx, bounds[1] * ry, bounds[2] * rz];
+            let density = self.neurons.density_at(pos, 0.5);
+
+            if density < best_density {
+                best_density = density;
+                best_pos = pos;
+            }
+        }
+
+        Some(best_pos)
+    }
+
+    /// Get a template by ID.
+    pub fn get_template(&self, id: u32) -> Option<&TemplateInstance> {
+        self.templates.get(id)
+    }
+
+    /// Get a mutable template by ID.
+    pub fn get_template_mut(&mut self, id: u32) -> Option<&mut TemplateInstance> {
+        self.templates.get_mut(id)
+    }
+
+    /// List all active template IDs.
+    pub fn list_template_ids(&self) -> Vec<u32> {
+        self.templates.all().iter().map(|t| t.id).collect()
+    }
+
+    /// Update template fitness based on activity correlation.
+    ///
+    /// Call periodically to measure how well templates are performing.
+    pub fn update_template_fitness(&mut self, alpha: f32) {
+        for template in self.templates.all_mut() {
+            // Measure correlation: did template neurons fire when receiving input?
+            let mut activity = 0u64;
+            for &idx in &template.neuron_indices {
+                if idx < self.spike_window.len() && self.spike_window[idx] {
+                    activity += 1;
+                }
+            }
+
+            // Fitness based on activity ratio
+            let activity_ratio = if template.neuron_indices.is_empty() {
+                0.0
+            } else {
+                activity as f32 / template.neuron_indices.len() as f32
+            };
+
+            // Update with EMA
+            template.update_fitness(activity_ratio, alpha);
+            template.cumulative_activity += activity;
+            template.tick();
+        }
+    }
+
+    /// Prune templates below fitness threshold.
+    ///
+    /// Returns IDs of pruned templates. Note: Does NOT remove the neurons;
+    /// they remain in the pool but are no longer associated with a template.
+    pub fn prune_unfit_templates(&mut self, threshold: f32, grace_period: u64) -> Vec<u32> {
+        self.templates.prune_unfit(threshold, grace_period)
+    }
+
+    /// Find templates that need a specific signal type.
+    pub fn templates_needing(&self, signal: SignalType) -> Vec<u32> {
+        self.templates.templates_needing(signal)
+    }
+
+    /// Find templates that offer a specific signal type.
+    pub fn templates_offering(&self, signal: SignalType) -> Vec<u32> {
+        self.templates.templates_offering(signal)
+    }
+
+    /// Get template centroid position.
+    pub fn template_centroid(&self, id: u32) -> Option<[f32; 3]> {
+        self.templates.get(id).map(|t| t.centroid)
+    }
+
+    /// Get template fitness score.
+    pub fn template_fitness(&self, id: u32) -> Option<f32> {
+        self.templates.get(id).map(|t| t.fitness)
+    }
+
+    /// Number of active templates.
+    pub fn template_count(&self) -> usize {
+        self.templates.len()
+    }
+
+    /// Inject sensory input through a SensoryArray template.
+    ///
+    /// This is how sensory organs work:
+    /// - Cochlea: frequency → hair cell position → neural activation
+    /// - Retina: light position → ganglion cell → neural activation
+    /// - SensoryArray: byte value → sensory neuron at that index
+    ///
+    /// For input bytes [b0, b1, b2, ...]:
+    /// - Sensory neuron at index b0 is activated
+    /// - Sensory neuron at index b1 is activated
+    /// - etc.
+    ///
+    /// The SAME sensory organ (template), different input "shapes" pass through.
+    /// "cat" [99, 97, 116] activates neurons 99, 97, 116.
+    /// "dog" [100, 111, 103] activates neurons 100, 111, 103.
+    ///
+    /// Returns number of neurons stimulated.
+    pub fn inject_sensory(
+        &mut self,
+        template_id: u32,
+        input_bytes: &[u8],
+        current: i16,
+    ) -> usize {
+        let template = match self.templates.get(template_id) {
+            Some(t) => t,
+            None => return 0,
+        };
+
+        // Template must have enough neurons for the byte range
+        let neurons = template.neuron_indices.clone();
+        let n = neurons.len();
+        if n == 0 || input_bytes.is_empty() {
+            return 0;
+        }
+
+        let mut stimulated = 0;
+
+        // Each byte value maps directly to a sensory neuron index
+        // This is the fixed topology of the sensory organ
+        for &byte in input_bytes {
+            if byte == 0 {
+                continue; // Skip null bytes
+            }
+
+            let sensory_idx = byte as usize;
+            if sensory_idx < n {
+                // Activate the sensory neuron at this index
+                let neuron_idx = neurons[sensory_idx];
+                self.neurons.membrane[neuron_idx] =
+                    self.neurons.membrane[neuron_idx].saturating_add(current);
+                stimulated += 1;
+            }
+        }
+
+        // Clear spike window for fresh measurement
+        for &idx in &neurons {
+            self.spike_window[idx] = false;
+            self.spike_window_count[idx] = 0;
+        }
+
+        stimulated
+    }
+
+    /// Wire inter-template connections based on need/offer matching and spatial proximity.
+    ///
+    /// This is the "axon growth" step: neurons from offering templates form synapses
+    /// to neurons in needing templates. Connection probability is based purely on:
+    /// - Spatial distance (closer = more likely)
+    /// - Need/offer signal matching
+    ///
+    /// No template knows about other templates. Only pressure gradients (need/offer)
+    /// and physical proximity drive wiring.
+    ///
+    /// Returns number of synapses created.
+    pub fn wire_inter_template(&mut self, max_distance: f32, base_probability: f32, seed: u64) -> usize {
+        // Collect all need/offer pairs
+        let mut connections_to_make: Vec<(usize, usize, f32)> = Vec::new();
+        let mut rng = seed;
+
+        // Get all template data upfront to avoid borrow issues
+        let template_data: Vec<(u32, Vec<usize>, [f32; 3], SignalType, SignalType)> = self.templates
+            .all()
+            .iter()
+            .map(|t| (t.id, t.neuron_indices.clone(), t.centroid, t.input_signal, t.output_signal))
+            .collect();
+
+        // For each pair of templates, check if one offers what the other needs
+        for (offer_id, offer_neurons, offer_centroid, _, offer_signal) in &template_data {
+            for (need_id, need_neurons, need_centroid, need_signal, _) in &template_data {
+                // Skip self-connections (within same template)
+                if offer_id == need_id {
+                    continue;
+                }
+
+                // Check if offer matches need
+                if offer_signal != need_signal {
+                    continue;
+                }
+
+                // Distance between template centroids
+                let dx = offer_centroid[0] - need_centroid[0];
+                let dy = offer_centroid[1] - need_centroid[1];
+                let dz = offer_centroid[2] - need_centroid[2];
+                let centroid_dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+                // Skip if too far
+                if centroid_dist > max_distance * 2.0 {
+                    continue;
+                }
+
+                // Create connections from offering neurons to needing neurons
+                // Probability decreases with distance
+                for &src_idx in offer_neurons {
+                    for &tgt_idx in need_neurons {
+                        // Neuron-to-neuron distance
+                        let src_pos = self.neurons.soma_position[src_idx];
+                        let tgt_pos = self.neurons.soma_position[tgt_idx];
+                        let ndx = src_pos[0] - tgt_pos[0];
+                        let ndy = src_pos[1] - tgt_pos[1];
+                        let ndz = src_pos[2] - tgt_pos[2];
+                        let neuron_dist = (ndx * ndx + ndy * ndy + ndz * ndz).sqrt();
+
+                        if neuron_dist > max_distance {
+                            continue;
+                        }
+
+                        // Probability: higher when closer
+                        let dist_factor = 1.0 - (neuron_dist / max_distance);
+                        let prob = base_probability * dist_factor * dist_factor; // Quadratic falloff
+
+                        // Random check
+                        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                        let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                        if roll < prob {
+                            connections_to_make.push((src_idx, tgt_idx, dist_factor));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Now create the synapses
+        let mut created = 0;
+        for (src, tgt, strength) in connections_to_make {
+            // Weight based on distance factor (closer = stronger)
+            let weight = (strength * 80.0) as i8; // Max weight ~80
+
+            let syn = crate::synapse::Synapse {
+                target: tgt as u16,
+                weight,
+                delay: 1,
+                eligibility: 0,
+                maturity: crate::synapse::maturity::encode(crate::synapse::ThermalState::Hot, 0),
+                _reserved: [0, 0],
+            };
+
+            self.synapses.add_synapse(src as u32, syn);
+            created += 1;
+        }
+
+        created
+    }
+
+    /// Wire intra-template recurrent connections for a specific template.
+    ///
+    /// Creates lateral inhibition dynamics within a template:
+    /// - Nearby neurons have weak excitatory connections (co-activation)
+    /// - Distant neurons have inhibitory connections (competition)
+    ///
+    /// This creates attractor dynamics where small input differences get
+    /// amplified into distinct stable states. Active neurons inhibit others,
+    /// causing winner-take-all dynamics within subpopulations.
+    ///
+    /// Returns number of synapses created.
+    pub fn wire_intra_template(
+        &mut self,
+        template_id: u32,
+        connectivity: f32, // 0.0-1.0, fraction of possible connections
+        seed: u64,
+    ) -> usize {
+        let template = match self.templates.get(template_id) {
+            Some(t) => t,
+            None => return 0,
+        };
+
+        let neurons = template.neuron_indices.clone();
+        let n = neurons.len();
+        if n < 2 {
+            return 0;
+        }
+
+        let mut rng = seed;
+        let mut created = 0;
+
+        // Create recurrent connections within the template
+        // Close neurons: weak excitation (co-activate)
+        // Distant neurons: inhibition (compete)
+        for (i, &src_idx) in neurons.iter().enumerate() {
+            for (j, &tgt_idx) in neurons.iter().enumerate() {
+                if i == j {
+                    continue; // No self-loops
+                }
+
+                // Probabilistic connection based on connectivity parameter
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < connectivity {
+                    // Distance between neurons
+                    let src_pos = self.neurons.soma_position[src_idx];
+                    let tgt_pos = self.neurons.soma_position[tgt_idx];
+                    let dx = src_pos[0] - tgt_pos[0];
+                    let dy = src_pos[1] - tgt_pos[1];
+                    let dz = src_pos[2] - tgt_pos[2];
+                    let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+                    // Lateral inhibition profile (Mexican hat):
+                    // Very close neurons: weak excitation (co-activation)
+                    // All other neurons: strong inhibition (competition)
+                    // This creates winner-take-all dynamics
+                    let excite_radius = 0.08; // Very tight excitation
+                    let max_dist = 0.5; // Cluster diameter
+
+                    let weight = if dist < excite_radius {
+                        // Very close: weak excitation
+                        let proximity = 1.0 - (dist / excite_radius);
+                        (proximity * 12.0) as i8 // Max +12
+                    } else {
+                        // All others: strong inhibition
+                        let remoteness = ((dist - excite_radius) / (max_dist - excite_radius)).min(1.0);
+                        let inh = 20 + (remoteness * 40.0) as i8; // -20 to -60
+                        -(inh.min(60))
+                    };
+
+                    let syn = crate::synapse::Synapse {
+                        target: tgt_idx as u16,
+                        weight,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Hot,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+
+                    self.synapses.add_synapse(src_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        created
+    }
+
+    /// Wire lateral inhibition using inhibitory neurons as the inhibitory pool.
+    ///
+    /// Creates feedback inhibition where:
+    /// 1. All excitatory neurons project TO inhibitory neurons (they integrate activity)
+    /// 2. All inhibitory neurons project TO all excitatory neurons (global suppression)
+    ///
+    /// This creates winner-take-all dynamics:
+    /// - High activity → strong inhibition → only strongest survive
+    /// - Enforces sparse coding (2-4% active neurons)
+    /// - Pattern separation: similar inputs activate different "winners"
+    ///
+    /// # Arguments
+    /// - `excite_to_inhib_prob`: Connection probability from excitatory → inhibitory (0.5-1.0)
+    /// - `inhib_to_excite_prob`: Connection probability from inhibitory → excitatory (0.5-1.0)
+    /// - `inhib_weight`: Inhibitory weight magnitude (negative, typically -40 to -80)
+    /// - `seed`: RNG seed for reproducibility
+    ///
+    /// # Returns
+    /// Number of synapses created.
+    pub fn wire_lateral_inhibition(
+        &mut self,
+        excite_to_inhib_prob: f32,
+        inhib_to_excite_prob: f32,
+        inhib_weight: i8,
+        seed: u64,
+    ) -> usize {
+        let n = self.n_neurons as usize;
+        if n < 2 {
+            return 0;
+        }
+
+        // Collect excitatory and inhibitory neuron indices
+        let mut excitatory: Vec<usize> = Vec::new();
+        let mut inhibitory: Vec<usize> = Vec::new();
+
+        for i in 0..n {
+            if crate::neuron::flags::is_inhibitory(self.neurons.flags[i]) {
+                inhibitory.push(i);
+            } else {
+                excitatory.push(i);
+            }
+        }
+
+        if inhibitory.is_empty() || excitatory.is_empty() {
+            return 0;
+        }
+
+        let mut rng = seed;
+        let mut created = 0;
+
+        // Phase 1: Excitatory → Inhibitory (integration)
+        // Each inhibitory neuron samples the population activity
+        for &exc_idx in &excitatory {
+            for &inh_idx in &inhibitory {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < excite_to_inhib_prob {
+                    // Excitatory synapse to inhibitory neuron
+                    // Weight: moderate positive (inhibitory neuron integrates activity)
+                    let syn = crate::synapse::Synapse {
+                        target: inh_idx as u16,
+                        weight: 20, // Moderate excitation to integrator
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(exc_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        // Phase 2: Inhibitory → Excitatory (suppression)
+        // Each inhibitory neuron suppresses all excitatory neurons
+        for &inh_idx in &inhibitory {
+            for &exc_idx in &excitatory {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < inhib_to_excite_prob {
+                    // Inhibitory synapse (negative weight)
+                    let syn = crate::synapse::Synapse {
+                        target: exc_idx as u16,
+                        weight: inhib_weight, // Strong negative weight
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(inh_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        created
+    }
+
+    /// Wire lateral inhibition within a specific template.
+    ///
+    /// Like `wire_lateral_inhibition` but scoped to neurons in a single template.
+    /// Useful for creating local competition within a computational motif.
+    ///
+    /// Uses Gate neurons within the template as the inhibitory pool.
+    /// If no Gate neurons exist, uses inhibitory neurons instead.
+    ///
+    /// # Returns
+    /// Number of synapses created.
+    pub fn wire_template_lateral_inhibition(
+        &mut self,
+        template_id: u32,
+        inhib_weight: i8,
+        seed: u64,
+    ) -> usize {
+        let template = match self.templates.get(template_id) {
+            Some(t) => t,
+            None => return 0,
+        };
+
+        let neurons = template.neuron_indices.clone();
+        if neurons.len() < 2 {
+            return 0;
+        }
+
+        // Find Gate neurons or inhibitory neurons within template
+        let mut excitatory: Vec<usize> = Vec::new();
+        let mut inhibitory: Vec<usize> = Vec::new();
+
+        for &idx in &neurons {
+            let flags = self.neurons.flags[idx];
+            let ntype = crate::neuron::NeuronType::from_flags(flags);
+
+            // Gate neurons are our primary inhibitory pool
+            if ntype == crate::neuron::NeuronType::Gate {
+                inhibitory.push(idx);
+            } else if crate::neuron::flags::is_inhibitory(flags) {
+                inhibitory.push(idx);
+            } else {
+                excitatory.push(idx);
+            }
+        }
+
+        if inhibitory.is_empty() || excitatory.is_empty() {
+            return 0;
+        }
+
+        let mut rng = seed;
+        let mut created = 0;
+
+        // All excitatory → all inhibitory (high probability, they integrate)
+        for &exc_idx in &excitatory {
+            for &inh_idx in &inhibitory {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < 0.8 {
+                    let syn = crate::synapse::Synapse {
+                        target: inh_idx as u16,
+                        weight: 15,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(exc_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        // All inhibitory → all excitatory (strong suppression)
+        for &inh_idx in &inhibitory {
+            for &exc_idx in &excitatory {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < 0.9 {
+                    let syn = crate::synapse::Synapse {
+                        target: exc_idx as u16,
+                        weight: inhib_weight,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(inh_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        created
+    }
+
+    /// Wire LOCAL lateral inhibition based on spatial proximity.
+    ///
+    /// Unlike `wire_lateral_inhibition` which creates global competition,
+    /// this version only connects neurons within a spatial neighborhood.
+    /// This prevents spurious overlap between spatially distant input patterns.
+    ///
+    /// # Parameters
+    /// - `radius`: Spatial radius for inhibition neighborhood
+    /// - `inhib_weight`: Negative weight for suppression synapses
+    /// - `seed`: RNG seed
+    ///
+    /// # Returns
+    /// Number of synapses created.
+    pub fn wire_local_lateral_inhibition(
+        &mut self,
+        radius: f32,
+        inhib_weight: i8,
+        seed: u64,
+    ) -> usize {
+        let n = self.n_neurons as usize;
+        if n < 2 {
+            return 0;
+        }
+
+        // Collect positions and classify neurons
+        let mut positions: Vec<[f32; 3]> = Vec::with_capacity(n);
+        let mut excitatory: Vec<usize> = Vec::new();
+        let mut inhibitory: Vec<usize> = Vec::new();
+
+        for i in 0..n {
+            positions.push(self.neurons.soma_position[i]);
+            if crate::neuron::flags::is_inhibitory(self.neurons.flags[i]) {
+                inhibitory.push(i);
+            } else {
+                excitatory.push(i);
+            }
+        }
+
+        if inhibitory.is_empty() || excitatory.is_empty() {
+            return 0;
+        }
+
+        let mut rng = seed;
+        let mut created = 0;
+        let radius_sq = radius * radius;
+
+        // For each inhibitory neuron, find nearby excitatory neurons
+        for &inh_idx in &inhibitory {
+            let inh_pos = positions[inh_idx];
+
+            // Find excitatory neurons within radius
+            let nearby_exc: Vec<usize> = excitatory
+                .iter()
+                .filter(|&&exc_idx| {
+                    let exc_pos = positions[exc_idx];
+                    let dx = exc_pos[0] - inh_pos[0];
+                    let dy = exc_pos[1] - inh_pos[1];
+                    let dz = exc_pos[2] - inh_pos[2];
+                    dx * dx + dy * dy + dz * dz <= radius_sq
+                })
+                .copied()
+                .collect();
+
+            // Wire excitatory → this inhibitory (integration)
+            for &exc_idx in &nearby_exc {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < 0.6 {
+                    let syn = crate::synapse::Synapse {
+                        target: inh_idx as u16,
+                        weight: 15, // Moderate excitation
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(exc_idx as u32, syn);
+                    created += 1;
+                }
+            }
+
+            // Wire this inhibitory → nearby excitatory (suppression)
+            for &exc_idx in &nearby_exc {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                if roll < 0.8 {
+                    let syn = crate::synapse::Synapse {
+                        target: exc_idx as u16,
+                        weight: inhib_weight,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(inh_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        created
+    }
+
+    /// Create explicit conductive chains between neuron groups.
+    ///
+    /// Establishes strong directional connections from source neurons to target neurons,
+    /// with signal intensity determined by the weight. Chains are pruned based on
+    /// activity correlation - unused chains decay via axon_health.
+    ///
+    /// # Parameters
+    /// - `sources`: Indices of source neurons
+    /// - `targets`: Indices of target neurons
+    /// - `weight`: Synapse weight (positive for excitation)
+    /// - `delay`: Synaptic delay in ticks
+    /// - `seed`: RNG seed
+    ///
+    /// # Returns
+    /// Number of synapses created.
+    pub fn wire_conductive_chain(
+        &mut self,
+        sources: &[usize],
+        targets: &[usize],
+        weight: i8,
+        delay: u8,
+        seed: u64,
+    ) -> usize {
+        let mut rng = seed;
+        let mut created = 0;
+
+        for &src in sources {
+            for &tgt in targets {
+                if src >= self.n_neurons as usize || tgt >= self.n_neurons as usize {
+                    continue;
+                }
+
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let roll = (rng >> 33) as f32 / (u32::MAX >> 1) as f32;
+
+                // High probability for chain connections
+                if roll < 0.7 {
+                    let syn = crate::synapse::Synapse {
+                        target: tgt as u16,
+                        weight,
+                        delay,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(src as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        created
+    }
+
+    /// Wire oscillatory synchronization between neurons.
+    ///
+    /// Creates bidirectional connections between oscillator neurons to enable
+    /// phase locking. Non-oscillator neurons within the group receive one-way
+    /// connections from oscillators for rhythm entrainment.
+    ///
+    /// # Parameters
+    /// - `neuron_indices`: Indices of neurons to synchronize
+    /// - `coupling_weight`: Weight for coupling synapses (typically low, 5-15)
+    /// - `seed`: RNG seed
+    ///
+    /// # Returns
+    /// Number of synapses created.
+    pub fn wire_oscillatory_sync(
+        &mut self,
+        neuron_indices: &[usize],
+        coupling_weight: i8,
+        seed: u64,
+    ) -> usize {
+        if neuron_indices.len() < 2 {
+            return 0;
+        }
+
+        // Find oscillators and followers
+        let mut oscillators: Vec<usize> = Vec::new();
+        let mut followers: Vec<usize> = Vec::new();
+
+        for &idx in neuron_indices {
+            if idx >= self.n_neurons as usize {
+                continue;
+            }
+            let flags = self.neurons.flags[idx];
+            let ntype = crate::neuron::NeuronType::from_flags(flags);
+
+            if ntype == crate::neuron::NeuronType::Oscillator {
+                oscillators.push(idx);
+            } else {
+                followers.push(idx);
+            }
+        }
+
+        let mut rng = seed;
+        let mut created = 0;
+
+        // Oscillator ↔ Oscillator (bidirectional coupling)
+        for i in 0..oscillators.len() {
+            for j in (i + 1)..oscillators.len() {
+                let src = oscillators[i];
+                let tgt = oscillators[j];
+
+                // Forward
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if (rng >> 33) as f32 / (u32::MAX >> 1) as f32 > 0.3 {
+                    let syn = crate::synapse::Synapse {
+                        target: tgt as u16,
+                        weight: coupling_weight,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(src as u32, syn);
+                    created += 1;
+                }
+
+                // Backward
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if (rng >> 33) as f32 / (u32::MAX >> 1) as f32 > 0.3 {
+                    let syn = crate::synapse::Synapse {
+                        target: src as u16,
+                        weight: coupling_weight,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(tgt as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        // Oscillator → Follower (entrainment)
+        for &osc_idx in &oscillators {
+            for &fol_idx in &followers {
+                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
+                if (rng >> 33) as f32 / (u32::MAX >> 1) as f32 > 0.4 {
+                    let syn = crate::synapse::Synapse {
+                        target: fol_idx as u16,
+                        weight: coupling_weight,
+                        delay: 1,
+                        eligibility: 0,
+                        maturity: crate::synapse::maturity::encode(
+                            crate::synapse::ThermalState::Warm,
+                            0,
+                        ),
+                        _reserved: [0, 0],
+                    };
+                    self.synapses.add_synapse(osc_idx as u32, syn);
+                    created += 1;
+                }
+            }
+        }
+
+        created
     }
 }
 

@@ -328,6 +328,16 @@ impl SynapseStore {
             *ptr += 1;
         }
     }
+
+    /// Extend the store to accommodate additional neurons (with no synapses).
+    ///
+    /// Used when dynamically spawning neurons from templates.
+    pub fn extend(&mut self, count: usize) {
+        let last_ptr = *self.row_ptr.last().unwrap_or(&0);
+        for _ in 0..count {
+            self.row_ptr.push(last_ptr);
+        }
+    }
 }
 
 #[cfg(test)]

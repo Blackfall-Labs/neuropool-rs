@@ -2,6 +2,36 @@
 //!
 //! Provides O(1) density lookups with trilinear interpolation.
 //! Used for axon growth resistance and region boundary detection.
+//!
+//! ## Tissue Types (Gray vs White Matter)
+//!
+//! - **Gray matter**: High soma density (>threshold), local processing
+//! - **White matter**: Low soma density (<threshold), axon corridors
+//!
+//! Axons traverse white matter easily but resist entering gray matter,
+//! creating natural boundaries between processing regions.
+
+/// Tissue type classification based on density.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TissueType {
+    /// High density - local processing, resists axon traversal
+    GrayMatter,
+    /// Low density - axon corridors, easy traversal
+    WhiteMatter,
+    /// Edge region - boundary between gray and white
+    Boundary,
+}
+
+/// Conductivity profile for signal propagation.
+#[derive(Debug, Clone, Copy)]
+pub struct Conductivity {
+    /// Base resistance (0.0 = perfect conductor, 1.0 = insulator)
+    pub resistance: f32,
+    /// Signal attenuation per unit distance
+    pub attenuation: f32,
+    /// Delay multiplier (1.0 = normal, >1 = slower)
+    pub delay_factor: f32,
+}
 
 /// Grid-based density field for fast spatial queries.
 ///
@@ -212,6 +242,142 @@ impl DensityField {
     /// Maximum density in the field.
     pub fn max_density(&self) -> f32 {
         self.grid.iter().cloned().fold(0.0f32, f32::max)
+    }
+
+    /// Classify tissue type at position based on density threshold.
+    ///
+    /// - density > high_threshold → GrayMatter
+    /// - density < low_threshold → WhiteMatter
+    /// - otherwise → Boundary
+    pub fn tissue_type_at(&self, pos: [f32; 3], gray_threshold: f32) -> TissueType {
+        let density = self.density_at(pos);
+        let boundary_margin = gray_threshold * 0.2; // 20% margin for boundary
+
+        if density > gray_threshold {
+            TissueType::GrayMatter
+        } else if density < gray_threshold - boundary_margin {
+            TissueType::WhiteMatter
+        } else {
+            TissueType::Boundary
+        }
+    }
+
+    /// Calculate conductivity at position.
+    ///
+    /// Higher density = higher resistance (harder for signals to propagate).
+    /// White matter has low resistance (fast conduction).
+    /// Gray matter has high resistance (local processing, not long-range).
+    pub fn conductivity_at(&self, pos: [f32; 3]) -> Conductivity {
+        let density = self.density_at(pos);
+        let max_density = self.max_density().max(1.0);
+        let normalized = density / max_density;
+
+        Conductivity {
+            // Resistance scales with density
+            resistance: normalized * 0.8, // 0.0-0.8 range
+            // Attenuation in gray matter
+            attenuation: 0.1 + normalized * 0.3, // 0.1-0.4 per unit
+            // Delay increases in gray matter
+            delay_factor: 1.0 + normalized * 2.0, // 1.0-3.0x
+        }
+    }
+
+    /// Find corridor path from start to end through low-density regions.
+    ///
+    /// Returns a sequence of positions forming a path that minimizes
+    /// total resistance. Uses gradient descent toward target.
+    pub fn find_corridor(&self, start: [f32; 3], end: [f32; 3], steps: usize) -> Vec<[f32; 3]> {
+        let mut path = Vec::with_capacity(steps + 1);
+        path.push(start);
+
+        let mut current = start;
+        let step_size = 0.5; // Fraction of voxel size
+
+        for _ in 0..steps {
+            // Direction toward target
+            let dx = end[0] - current[0];
+            let dy = end[1] - current[1];
+            let dz = end[2] - current[2];
+            let dist = (dx * dx + dy * dy + dz * dz).sqrt();
+
+            if dist < self.voxel_size[0] * 0.5 {
+                break; // Close enough
+            }
+
+            // Normalize direction
+            let dir = [dx / dist, dy / dist, dz / dist];
+
+            // Also consider density gradient (prefer lower density)
+            let grad = self.density_gradient_at(current);
+
+            // Combine: move toward target but bias toward lower density
+            let bias = 0.3; // How much to favor low density
+            let next = [
+                current[0] + (dir[0] - grad[0] * bias) * step_size * self.voxel_size[0],
+                current[1] + (dir[1] - grad[1] * bias) * step_size * self.voxel_size[1],
+                current[2] + (dir[2] - grad[2] * bias) * step_size * self.voxel_size[2],
+            ];
+
+            // Clamp to bounds
+            let next = [
+                next[0].max(0.0).min(self.bounds[0]),
+                next[1].max(0.0).min(self.bounds[1]),
+                next[2].max(0.0).min(self.bounds[2]),
+            ];
+
+            path.push(next);
+            current = next;
+        }
+
+        path.push(end);
+        path
+    }
+
+    /// Calculate density gradient at position (direction of increasing density).
+    ///
+    /// Returns normalized direction vector pointing toward higher density.
+    /// Negate to get direction toward lower density.
+    pub fn density_gradient_at(&self, pos: [f32; 3]) -> [f32; 3] {
+        let eps = self.voxel_size[0] * 0.1;
+
+        // Central differences
+        let dx = self.density_at([pos[0] + eps, pos[1], pos[2]])
+            - self.density_at([pos[0] - eps, pos[1], pos[2]]);
+        let dy = self.density_at([pos[0], pos[1] + eps, pos[2]])
+            - self.density_at([pos[0], pos[1] - eps, pos[2]]);
+        let dz = self.density_at([pos[0], pos[1], pos[2] + eps])
+            - self.density_at([pos[0], pos[1], pos[2] - eps]);
+
+        // Normalize
+        let mag = (dx * dx + dy * dy + dz * dz).sqrt();
+        if mag > 1e-6 {
+            [dx / mag, dy / mag, dz / mag]
+        } else {
+            [0.0, 0.0, 0.0]
+        }
+    }
+
+    /// Find neurons within a spatial neighborhood.
+    ///
+    /// Returns indices into the positions array for neurons within radius of center.
+    pub fn neurons_in_radius(
+        &self,
+        positions: &[[f32; 3]],
+        center: [f32; 3],
+        radius: f32,
+    ) -> Vec<usize> {
+        let radius_sq = radius * radius;
+        positions
+            .iter()
+            .enumerate()
+            .filter(|(_, pos)| {
+                let dx = pos[0] - center[0];
+                let dy = pos[1] - center[1];
+                let dz = pos[2] - center[2];
+                dx * dx + dy * dy + dz * dz <= radius_sq
+            })
+            .map(|(i, _)| i)
+            .collect()
     }
 }
 

@@ -411,6 +411,8 @@ impl NeuronPool {
             chem_exposure: vec![0u8; delay_buf_n],
             generation: 0,
             journal: crate::pool::MutationJournal::new(16),
+            templates: crate::template::TemplateRegistry::new(),
+            spatial_bounds: None,
             config,
         })
     }
