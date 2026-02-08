@@ -292,6 +292,15 @@ impl SpatialRuntime {
         &self.correlations
     }
 
+    /// Set the mastery budget added per learning cycle.
+    ///
+    /// Higher budget → more synaptic changes per cycle (consolidation).
+    /// Lower budget → fewer changes (exploration / loosening).
+    #[inline]
+    pub fn set_mastery_budget(&mut self, budget: u32) {
+        self.config.mastery_budget_per_cycle = budget;
+    }
+
     // =========================================================================
     // Internal subsystem orchestration
     // =========================================================================
