@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Synaptic Pruning — connections die, neurons persist.
 //!
 //! In spatial neurons, neurons never die (except in pathology).

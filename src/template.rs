@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Computational Templates (Circuit Motifs)
 //!
 //! Templates are structural recipes that the spatial brain instantiates.

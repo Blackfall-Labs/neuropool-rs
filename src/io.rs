@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! External I/O trait for specialized neurons.
 //!
 //! NeuronIO provides an abstraction layer so that neuropool-rs doesn't depend

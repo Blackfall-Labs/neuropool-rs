@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! SpatialRuntime — orchestrates cascade, tissue, migration, pruning, and mastery.
 //!
 //! Extracts the runtime loop from test code into a reusable struct.

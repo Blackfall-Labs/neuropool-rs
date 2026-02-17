@@ -1,8 +1,8 @@
 [package]
 name = "neuropool"
-version = "1.0.0"
+version = "3.0.0"
 edition = "2021"
-description = "Spatial neuron point cloud — LIF neurons in 3D space with mastery learning, tissue physics, migration, pruning, and stamina"
+description = "Neuromorphic neuron pool substrate — zone-aware cascade engine with dendritic compartments, imaginal disc incubation, and binary persistence"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Blackfall-Labs/neuropool-rs"
 keywords = ["neuromorphic", "spiking", "plasticity", "neuron", "synapse"]

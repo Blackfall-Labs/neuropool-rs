@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! SpatialNeuron — the complete biological neuron.
 //!
 //! Combines anatomy (soma, dendrite, axon), nuclei (capabilities),

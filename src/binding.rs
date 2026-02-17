@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Binding configuration for specialized neurons.
 //!
 //! Each non-Computational neuron has a binding_slot (1 byte) that indexes into

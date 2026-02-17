@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Event-driven cascade execution model.
 //!
 //! Unlike the synchronous `tick()` model where all neurons update every cycle,

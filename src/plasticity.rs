@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Three-factor plasticity — the core credit assignment mechanism.
 //!
 //! Three-factor learning rule: eligibility_trace * neuromodulator = weight_change.

@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Pool inspection and diagnostics.
 
 use crate::neuron::{NeuronType, flags};

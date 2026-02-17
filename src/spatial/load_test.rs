@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Load Testing & Break Tests for Spatial Neurons
 //!
 //! This module provides:

@@ -260,6 +260,37 @@ impl Nuclei {
         }
     }
 
+    /// Ternsig program neuron — participates in collective activation.
+    ///
+    /// When enough ternsig-bound neurons activate together, the bound program
+    /// fires. Balanced properties, moderate cost.
+    pub const fn ternsig(program_id: u32) -> Self {
+        Self {
+            soma_size: 120,
+            axon_affinity: 120,
+            myelin_affinity: 100,
+            metabolic_rate: 80,
+            leak: 100,
+            refractory: 1500,
+            oscillation_period: 0,
+            interface: Interface::ternsig(program_id),
+            polarity: Polarity::Positive,
+        }
+    }
+
+    // =========================================================================
+    // Structural Plasticity
+    // =========================================================================
+
+    /// Mutate nuclei to a new type (structural plasticity).
+    ///
+    /// Replaces all physical properties. Position and anatomy (dendrite, axon)
+    /// are preserved by the neuron — this only changes the capability machine.
+    #[inline]
+    pub fn mutate_to(&mut self, new: Nuclei) {
+        *self = new;
+    }
+
     // =========================================================================
     // Property Queries
     // =========================================================================

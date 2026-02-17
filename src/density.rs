@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Density Field — grid-based soma density for spatial queries.
 //!
 //! Provides O(1) density lookups with trilinear interpolation.

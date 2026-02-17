@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Neuron data structures — SoA (Structure of Arrays) layout for cache performance.
 //!
 //! Each neuron field is stored as a separate contiguous array so that the tick

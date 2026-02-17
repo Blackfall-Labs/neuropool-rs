@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Binary .pool persistence format.
 //!
 //! Header (16 bytes):
@@ -142,6 +143,8 @@ fn deserialize_config(r: &mut &[u8]) -> io::Result<PoolConfig> {
         stdp_positive: read_i8(r)?,
         stdp_negative: read_i8(r)?,
         max_delay: read_u8(r)?,
+        threshold_jitter: 512,   // Runtime config, not persisted — use defaults
+        spontaneous_rate: 5,
         growth: crate::pool::GrowthConfig::default(),
         evolution: crate::pool::EvolutionConfig::default(),
     })

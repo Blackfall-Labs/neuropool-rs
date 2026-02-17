@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! NeuronPool — the top-level container and tick loop.
 //!
 //! Integer-only LIF (Leaky Integrate-and-Fire) dynamics with synaptic delay
@@ -394,6 +395,15 @@ pub struct PoolConfig {
     pub stdp_negative: i8,
     /// Maximum axonal delay in ticks. Default: 8
     pub max_delay: u8,
+    /// Threshold jitter half-range (Q8.8). Each neuron gets a per-tick
+    /// pseudorandom threshold offset in [-jitter, +jitter], breaking
+    /// synchronous firing patterns. Default: 512 (~2mV). Set to 0 to disable.
+    pub threshold_jitter: i16,
+    /// Spontaneous depolarization rate (0-255). Each tick, each neuron has
+    /// a probability of spontaneous_rate/256 of receiving a small random
+    /// membrane depolarization bump. Biological basis: neurons in vivo exhibit
+    /// baseline spontaneous activity even without input. Default: 5 (~2%).
+    pub spontaneous_rate: u8,
     /// Growth engine configuration. Default: derived from 256 neurons.
     pub growth: GrowthConfig,
     /// Evolution engine configuration.
@@ -413,6 +423,8 @@ impl Default for PoolConfig {
             stdp_positive: 20,
             stdp_negative: -10,
             max_delay: 8,
+            threshold_jitter: 512,
+            spontaneous_rate: 5,
             growth: GrowthConfig::default(),
             evolution: EvolutionConfig::default(),
         }
@@ -1085,6 +1097,22 @@ impl NeuronPool {
             let leak_current = (self.config.resting_potential as i32 - self.neurons.membrane[i] as i32) >> leak_shift;
             self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(leak_current as i16);
 
+            // 2b2. Spontaneous depolarization: small random membrane bump.
+            // Neurons in vivo are never truly silent — channel noise, miniature
+            // postsynaptic potentials, and metabolic fluctuations create baseline
+            // activity that breaks synchrony and enables stochastic resonance.
+            if self.config.spontaneous_rate > 0 {
+                let spont_seed = self.tick_count.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(i as u64);
+                let spont_hash = (spont_seed ^ (spont_seed >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+                if (spont_hash % 256) < self.config.spontaneous_rate as u64 {
+                    // Small depolarization: 0-1023 in Q8.8 (~0-4mV). Enough to
+                    // occasionally push near-threshold neurons over, not enough
+                    // to fire resting neurons directly.
+                    let bump = ((spont_hash >> 8) % 1024) as i16;
+                    self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(bump);
+                }
+            }
+
             // 2c. Add external input
             if i < input_currents.len() {
                 self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(input_currents[i]);
@@ -1141,8 +1169,21 @@ impl NeuronPool {
                 _ => {} // Computational, Relay, Motor, MemoryReader — no pre-spike action
             }
 
-            // 2f. Spike check
-            if self.neurons.membrane[i] >= self.neurons.threshold[i] {
+            // 2f. Spike check (with per-neuron threshold jitter to break synchrony).
+            // Each neuron gets a pseudorandom threshold offset each tick, so
+            // identically-driven neurons cross threshold at different ticks.
+            // This produces wave-like spatial propagation instead of uniform
+            // pool-wide simultaneous firing.
+            let effective_threshold = if self.config.threshold_jitter > 0 {
+                let jitter_range = self.config.threshold_jitter as i32;
+                let jitter_seed = self.tick_count.wrapping_mul(2654435761).wrapping_add(i as u64);
+                let jitter_hash = (jitter_seed ^ (jitter_seed >> 17)).wrapping_mul(0x94D049BB133111EB);
+                let jitter = ((jitter_hash as i32) % (jitter_range * 2 + 1)) - jitter_range;
+                self.neurons.threshold[i].saturating_add(jitter as i16)
+            } else {
+                self.neurons.threshold[i]
+            };
+            if self.neurons.membrane[i] >= effective_threshold {
                 self.neurons.spike_out[i] = true;
                 self.spike_window[i] = true;
                 self.spike_window_count[i] = self.spike_window_count[i].saturating_add(1);
@@ -1283,25 +1324,50 @@ impl NeuronPool {
     ///
     /// Signal polarity determines excitation (+) or inhibition (-).
     /// Magnitude is scaled to Q8.8 current.
+    ///
+    /// Spike window counts decay by 1 (saturating) on each injection rather
+    /// than resetting to zero. This creates a sliding measurement window where
+    /// recent spikes contribute more than older ones, producing gradual
+    /// rate-coded output evolution instead of binary on/off jumps.
     pub fn inject(&mut self, neuron_range: Range<u32>, signal: Signal) {
         let current = signal.as_signed_i32() as i16 * 128; // Scale to Q8.8
         let start = neuron_range.start as usize;
         let end = (neuron_range.end as usize).min(self.n_neurons as usize);
 
-        // Clear spike window — new measurement window begins with each injection
-        self.spike_window.fill(false);
-        self.spike_window_count.fill(0);
+        // Decay spike window — sliding measurement instead of hard reset.
+        // Activity fades gradually, so read_output() reports a continuous
+        // rate-coded signal rather than jumping between 0 and max.
+        for i in 0..self.n_neurons as usize {
+            self.spike_window_count[i] = self.spike_window_count[i].saturating_sub(1);
+            if self.spike_window_count[i] == 0 {
+                self.spike_window[i] = false;
+            }
+        }
 
         for i in start..end {
             self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(current);
         }
     }
 
+    /// Decay spike window counts by 1 (saturating) without injecting current.
+    ///
+    /// Call this periodically for regions that read output more often than
+    /// they inject input. Creates a sliding measurement window where activity
+    /// fades over time, producing continuous rate-coded output evolution.
+    pub fn decay_spike_window(&mut self) {
+        for i in 0..self.n_neurons as usize {
+            self.spike_window_count[i] = self.spike_window_count[i].saturating_sub(1);
+            if self.spike_window_count[i] == 0 {
+                self.spike_window[i] = false;
+            }
+        }
+    }
+
     /// Read output from a range of neurons as Signal vector.
     ///
     /// Reports any neuron that spiked at ANY point during the current
-    /// measurement window (since the last `inject()` call). This captures
-    /// activity from the entire tick sequence, not just the final tick.
+    /// measurement window. Activity fades gradually as spike_window_count
+    /// decays on each inject() or decay_spike_window() call.
     ///
     /// Biological basis: a neuron that fired during a processing window
     /// is "active" regardless of current refractory state.

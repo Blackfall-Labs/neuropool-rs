@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! # Spatial Neurons — Biologically Accurate Point-Cloud Neurons
 //!
 //! This module implements the "new" neuron system with real anatomy and physics.

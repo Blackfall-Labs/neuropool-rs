@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Proximity-Based Wiring — connect neurons by spatial proximity.
 //!
 //! Creates synapses based on physical distance between axon terminals

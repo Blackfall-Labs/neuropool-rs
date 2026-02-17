@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Integration Test: Emergent Co-Wiring with Character Prediction
 //!
 //! This test creates a mini neural system with three regions:

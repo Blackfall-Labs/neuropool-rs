@@ -115,6 +115,7 @@ impl Interface {
     pub const KIND_MOTOR_BASE: u8 = 50;
     pub const KIND_MEMORY_BASE: u8 = 100;
     pub const KIND_CHEMICAL_BASE: u8 = 150;
+    pub const KIND_TERNSIG: u8 = 180;
     pub const KIND_USER_BASE: u8 = 200;
 
     // Modality constants
@@ -189,6 +190,32 @@ impl Interface {
             modality: Self::MODALITY_NONE,
             gates: EnergyGates::default(),
         }
+    }
+
+    /// Ternsig program interface — binds this neuron to a ternsig program.
+    ///
+    /// `program_id` is the program this neuron participates in. Multiple neurons
+    /// share a program_id; collective activation triggers the program.
+    #[inline]
+    pub const fn ternsig(program_id: u32) -> Self {
+        Self {
+            kind: Self::KIND_TERNSIG,
+            target: program_id as u16, // low 16 bits — sufficient for program IDs
+            modality: (program_id >> 16) as u8, // high bits if needed
+            gates: EnergyGates::default(),
+        }
+    }
+
+    /// Is this a ternsig program interface?
+    #[inline]
+    pub const fn is_ternsig(&self) -> bool {
+        self.kind == Self::KIND_TERNSIG
+    }
+
+    /// Get the ternsig program ID (if this is a ternsig interface).
+    #[inline]
+    pub const fn ternsig_program_id(&self) -> u32 {
+        self.target as u32 | ((self.modality as u32) << 16)
     }
 
     /// User-defined interface.

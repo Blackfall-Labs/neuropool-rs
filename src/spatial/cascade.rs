@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Event-Driven Cascade Executor for Spatial Neurons
 //!
 //! Unlike tick-based execution (all neurons every cycle), cascade execution

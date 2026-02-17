@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Synapse data structures — 8-byte compact synapses with CSR storage.
 //!
 //! Each synapse is 8 bytes: target(2) + weight(1) + delay(1) + eligibility(1)

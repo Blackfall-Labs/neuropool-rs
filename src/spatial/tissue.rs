@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Tissue Field — Emergent Gray/White Matter from Point Cloud
 //!
 //! Tissue properties emerge from neuron positions, not from predefined voxels.
