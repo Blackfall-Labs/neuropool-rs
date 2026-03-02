@@ -387,9 +387,9 @@ dependencies = [
 
 [[package]]
 name = "ternary-signal"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "594d426a9d36bcf71a5b001313c5a084c644d2afef646272e1a38052ea9bd722"
+checksum = "12e42c0ddcf996464e107514baef3a66b0fbedc94c695a3d74af8b71fc6d4524"
 dependencies = [
  "serde",
 ]

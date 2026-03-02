@@ -9,7 +9,7 @@ keywords = ["neuromorphic", "spiking", "plasticity", "neuron", "synapse"]
 categories = ["science", "simulation"]
 
 [dependencies]
-ternary-signal = "0.1"
+ternary-signal = "0.2"
 log = "0.4"
 
 [dev-dependencies]
