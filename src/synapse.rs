@@ -400,21 +400,24 @@ mod tests {
 
     #[test]
     fn dale_law_excitatory() {
-        let exc_flags = crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
+        let exc_flags =
+            crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
         let syn = Synapse::new(42, 100, 2, exc_flags);
         assert!(syn.weight > 0);
     }
 
     #[test]
     fn dale_law_inhibitory() {
-        let inh_flags = crate::neuron::flags::encode(true, crate::neuron::NeuronProfile::FastSpiking);
+        let inh_flags =
+            crate::neuron::flags::encode(true, crate::neuron::NeuronProfile::FastSpiking);
         let syn = Synapse::new(42, 100, 2, inh_flags);
         assert!(syn.weight < 0);
     }
 
     #[test]
     fn csr_basic() {
-        let exc_flags = crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
+        let exc_flags =
+            crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
         let edges = vec![
             (0, Synapse::new(1, 50, 1, exc_flags)),
             (0, Synapse::new(2, 30, 1, exc_flags)),
@@ -431,7 +434,8 @@ mod tests {
     #[test]
     fn csr_prune_dead() {
         let mut store = SynapseStore::empty(2);
-        let exc_flags = crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
+        let exc_flags =
+            crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
 
         // Add some synapses
         store.add_synapse(0, Synapse::new(1, 50, 1, exc_flags));

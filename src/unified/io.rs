@@ -52,13 +52,19 @@ pub struct NullUnifiedIO;
 
 impl UnifiedNeuronIO for NullUnifiedIO {
     #[inline]
-    fn read_sensory(&self, _channel: u16, _modality: u8) -> i16 { 0 }
+    fn read_sensory(&self, _channel: u16, _modality: u8) -> i16 {
+        0
+    }
     #[inline]
     fn write_motor(&mut self, _channel: u16, _modality: u8, _magnitude: i16) {}
     #[inline]
-    fn memory_query(&mut self, _bank_id: u16, _query: &[i16]) -> i16 { 0 }
+    fn memory_query(&mut self, _bank_id: u16, _query: &[i16]) -> i16 {
+        0
+    }
     #[inline]
     fn memory_write(&mut self, _bank_id: u16, _pattern: &[i16]) {}
     #[inline]
-    fn read_chemical(&self, _chemical_id: u8) -> u8 { 0 }
+    fn read_chemical(&self, _chemical_id: u8) -> u8 {
+        0
+    }
 }

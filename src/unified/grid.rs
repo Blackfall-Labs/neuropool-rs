@@ -12,8 +12,8 @@
 //!         └── neuron index range [start..end) in flat array
 //! ```
 
-use std::collections::HashMap;
 use super::neuron::UnifiedNeuron;
+use std::collections::HashMap;
 
 /// A neighborhood within a single voxel — stores a neuron index range.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,7 +63,11 @@ impl GridDims {
     #[inline]
     pub fn linear_index(&self, x: u16, y: u16, z: u16) -> Option<usize> {
         if x < self.x && y < self.y && z < self.z {
-            Some(x as usize + y as usize * self.x as usize + z as usize * self.x as usize * self.y as usize)
+            Some(
+                x as usize
+                    + y as usize * self.x as usize
+                    + z as usize * self.x as usize * self.y as usize,
+            )
         } else {
             None
         }
@@ -100,7 +104,11 @@ impl VoxelGrid {
     pub fn build(neurons: &mut [UnifiedNeuron]) -> Self {
         // Determine grid bounds from neuron positions
         let (max_x, max_y, max_z) = neurons.iter().fold((0u16, 0u16, 0u16), |(mx, my, mz), n| {
-            (mx.max(n.position.voxel.0), my.max(n.position.voxel.1), mz.max(n.position.voxel.2))
+            (
+                mx.max(n.position.voxel.0),
+                my.max(n.position.voxel.1),
+                mz.max(n.position.voxel.2),
+            )
         });
 
         let dims = GridDims {
@@ -128,7 +136,9 @@ impl VoxelGrid {
         // Count neurons per voxel
         let mut counts: HashMap<usize, u32> = HashMap::new();
         for n in neurons.iter() {
-            if let Some(idx) = dims.linear_index(n.position.voxel.0, n.position.voxel.1, n.position.voxel.2) {
+            if let Some(idx) =
+                dims.linear_index(n.position.voxel.0, n.position.voxel.1, n.position.voxel.2)
+            {
                 *counts.entry(idx).or_insert(0) += 1;
             }
         }
@@ -144,12 +154,17 @@ impl VoxelGrid {
             offset += count;
         }
 
-        Self { dims, neighborhoods }
+        Self {
+            dims,
+            neighborhoods,
+        }
     }
 
     /// Get the neighborhood for a voxel position.
     pub fn neighborhood(&self, x: u16, y: u16, z: u16) -> Option<&VoxelNeighborhood> {
-        self.dims.linear_index(x, y, z).map(|i| &self.neighborhoods[i])
+        self.dims
+            .linear_index(x, y, z)
+            .map(|i| &self.neighborhoods[i])
     }
 
     /// Get neuron indices for a specific voxel.
@@ -164,17 +179,23 @@ impl VoxelGrid {
     pub fn neighbors_6(&self, x: u16, y: u16, z: u16) -> Vec<(u16, u16, u16)> {
         let mut result = Vec::with_capacity(6);
         let offsets: [(i32, i32, i32); 6] = [
-            (-1, 0, 0), (1, 0, 0),
-            (0, -1, 0), (0, 1, 0),
-            (0, 0, -1), (0, 0, 1),
+            (-1, 0, 0),
+            (1, 0, 0),
+            (0, -1, 0),
+            (0, 1, 0),
+            (0, 0, -1),
+            (0, 0, 1),
         ];
         for (dx, dy, dz) in offsets {
             let nx = x as i32 + dx;
             let ny = y as i32 + dy;
             let nz = z as i32 + dz;
-            if nx >= 0 && nx < self.dims.x as i32
-                && ny >= 0 && ny < self.dims.y as i32
-                && nz >= 0 && nz < self.dims.z as i32
+            if nx >= 0
+                && nx < self.dims.x as i32
+                && ny >= 0
+                && ny < self.dims.y as i32
+                && nz >= 0
+                && nz < self.dims.z as i32
             {
                 result.push((nx as u16, ny as u16, nz as u16));
             }
@@ -194,9 +215,12 @@ impl VoxelGrid {
                     let nx = x as i32 + dx;
                     let ny = y as i32 + dy;
                     let nz = z as i32 + dz;
-                    if nx >= 0 && nx < self.dims.x as i32
-                        && ny >= 0 && ny < self.dims.y as i32
-                        && nz >= 0 && nz < self.dims.z as i32
+                    if nx >= 0
+                        && nx < self.dims.x as i32
+                        && ny >= 0
+                        && ny < self.dims.y as i32
+                        && nz >= 0
+                        && nz < self.dims.z as i32
                     {
                         result.push((nx as u16, ny as u16, nz as u16));
                     }

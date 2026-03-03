@@ -10,9 +10,11 @@ use ternary_signal::Signal;
 
 use crate::binding::BindingTable;
 use crate::io::{NeuronIO, NullIO};
-use crate::neuron::{NeuronArrays, NeuronType, flags};
+use crate::neuron::{flags, NeuronArrays, NeuronType};
 use crate::synapse::{Synapse, SynapseStore};
-use crate::template::{SignalType, TemplateType, TemplateRequest, TemplateInstance, TemplateRegistry};
+use crate::template::{
+    SignalType, TemplateInstance, TemplateRegistry, TemplateRequest, TemplateType,
+};
 
 /// 3D spatial dimensions for a neuron pool grid.
 ///
@@ -30,13 +32,20 @@ pub struct SpatialDims {
 impl SpatialDims {
     /// Create spatial dimensions. Panics if any dimension is zero.
     pub fn new(w: u16, h: u16, d: u16) -> Self {
-        assert!(w > 0 && h > 0 && d > 0, "spatial dimensions must be non-zero");
+        assert!(
+            w > 0 && h > 0 && d > 0,
+            "spatial dimensions must be non-zero"
+        );
         Self { w, h, d }
     }
 
     /// Flat dimensions (1D array of n neurons, no spatial structure).
     pub fn flat(n: u32) -> Self {
-        Self { w: n as u16, h: 1, d: 1 }
+        Self {
+            w: n as u16,
+            h: 1,
+            d: 1,
+        }
     }
 
     /// Total number of voxels in the grid.
@@ -88,7 +97,9 @@ impl SpatialDims {
         }
         // Extend the deepest dimension (d) by enough layers to fit `additional` neurons
         let layer_size = self.w as u32 * self.h as u32;
-        if layer_size == 0 { return; }
+        if layer_size == 0 {
+            return;
+        }
         let extra_layers = (additional + layer_size - 1) / layer_size;
         self.d = self.d.saturating_add(extra_layers as u16);
     }
@@ -103,9 +114,7 @@ impl SpatialDims {
     #[inline]
     pub fn is_boundary(&self, i: u32) -> bool {
         let (x, y, z) = self.coords(i);
-        x == 0 || x == self.w - 1
-            || y == 0 || y == self.h - 1
-            || z == 0 || z == self.d - 1
+        x == 0 || x == self.w - 1 || y == 0 || y == self.h - 1 || z == 0 || z == self.d - 1
     }
 }
 
@@ -169,12 +178,19 @@ pub struct TypeDistributionSpec {
 impl TypeDistributionSpec {
     /// All Computational (no specialization). Used as default.
     pub fn all_computational() -> Self {
-        Self { gate_pct: 0, oscillator_pct: 0, sensory_pct: 0, motor_pct: 0, memory_pct: 0 }
+        Self {
+            gate_pct: 0,
+            oscillator_pct: 0,
+            sensory_pct: 0,
+            motor_pct: 0,
+            memory_pct: 0,
+        }
     }
 
     /// Total allocated percentage (must not exceed 100).
     pub fn total_pct(&self) -> u8 {
-        self.gate_pct.saturating_add(self.oscillator_pct)
+        self.gate_pct
+            .saturating_add(self.oscillator_pct)
             .saturating_add(self.sensory_pct)
             .saturating_add(self.motor_pct)
             .saturating_add(self.memory_pct)
@@ -305,7 +321,9 @@ impl MutationJournal {
         if self.entries.is_empty() {
             return 0;
         }
-        let sum: i32 = self.entries.iter()
+        let sum: i32 = self
+            .entries
+            .iter()
             .map(|e| e.fitness_after as i32 - e.fitness_before as i32)
             .sum();
         (sum / self.entries.len() as i32) as i16
@@ -609,7 +627,13 @@ impl NeuronPool {
         density: f32,
         config: PoolConfig,
     ) -> Self {
-        Self::with_random_connectivity_seeded(name, n_neurons, density, config, 0xDEAD_BEEF_CAFE_1337)
+        Self::with_random_connectivity_seeded(
+            name,
+            n_neurons,
+            density,
+            config,
+            0xDEAD_BEEF_CAFE_1337,
+        )
     }
 
     /// Create a pool with random connectivity using a deterministic seed.
@@ -629,7 +653,9 @@ impl NeuronPool {
         // Simple LCG for deterministic random without pulling in rand crate
         let mut rng_state: u64 = seed ^ (n_neurons as u64);
         let lcg_next = |state: &mut u64| -> u32 {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*state >> 33) as u32
         };
 
@@ -641,8 +667,12 @@ impl NeuronPool {
         for src in 0..n_neurons {
             let src_flags = pool.neurons.flags[src as usize];
             for tgt in 0..n_neurons {
-                if src == tgt { continue; } // No self-connections
-                if per_neuron_count[src as usize] >= max_syn { break; }
+                if src == tgt {
+                    continue;
+                } // No self-connections
+                if per_neuron_count[src as usize] >= max_syn {
+                    break;
+                }
 
                 if lcg_next(&mut rng_state) < density_threshold {
                     let magnitude = (lcg_next(&mut rng_state) % 60 + 10) as u8; // 10-69
@@ -690,7 +720,9 @@ impl NeuronPool {
             // Exact computation for pools up to 512 neurons
             for i in 0..n_neurons {
                 for j in 0..n_neurons {
-                    if i == j { continue; }
+                    if i == j {
+                        continue;
+                    }
                     let d_sq = dims.distance_sq(i, j);
                     gaussian_sum += (-(d_sq as f64) / two_sigma_sq as f64).exp();
                 }
@@ -700,11 +732,17 @@ impl NeuronPool {
             let mut rng = seed ^ 0x1234_5678;
             let samples = 10000u64;
             for _ in 0..samples {
-                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let i = ((rng >> 33) as u32) % n_neurons;
-                rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                rng = rng
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
                 let j = ((rng >> 33) as u32) % n_neurons;
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 let d_sq = dims.distance_sq(i, j);
                 gaussian_sum += (-(d_sq as f64) / two_sigma_sq as f64).exp();
             }
@@ -714,7 +752,11 @@ impl NeuronPool {
 
         // norm = desired_edges / gaussian_sum
         let desired_edges = density as f64 * (n * (n - 1)) as f64;
-        let norm = if gaussian_sum > 0.0 { desired_edges / gaussian_sum } else { density as f64 };
+        let norm = if gaussian_sum > 0.0 {
+            desired_edges / gaussian_sum
+        } else {
+            density as f64
+        };
 
         // Build LUT: for each d_sq value, compute threshold = norm * exp(-d_sq/2σ²) * u32::MAX
         let max_d_sq_usize = (max_d_sq as usize).min(512); // cap LUT size
@@ -727,7 +769,9 @@ impl NeuronPool {
         // --- Generate edges using LUT ---
         let mut rng_state: u64 = seed ^ (n_neurons as u64);
         let lcg_next = |state: &mut u64| -> u32 {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*state >> 33) as u32
         };
 
@@ -740,8 +784,12 @@ impl NeuronPool {
         for src in 0..n_neurons {
             let src_flags = pool.neurons.flags[src as usize];
             for tgt in 0..n_neurons {
-                if src == tgt { continue; }
-                if per_neuron_count[src as usize] >= max_syn { break; }
+                if src == tgt {
+                    continue;
+                }
+                if per_neuron_count[src as usize] >= max_syn {
+                    break;
+                }
 
                 let d_sq = dims.distance_sq(src, tgt);
                 let d_sq_idx = (d_sq as usize).min(max_d_sq_usize);
@@ -749,7 +797,7 @@ impl NeuronPool {
 
                 if lcg_next(&mut rng_state) < threshold {
                     let magnitude = (lcg_next(&mut rng_state) % 60 + 10) as u8; // 10-69
-                    // Distance-proportional delay
+                                                                                // Distance-proportional delay
                     let dist_ratio = if sqrt_max_d > 0.0 {
                         (d_sq as f32).sqrt() / sqrt_max_d
                     } else {
@@ -795,7 +843,9 @@ impl NeuronPool {
         }
 
         for i in 0..n {
-            if !dims.is_boundary(i) { continue; }
+            if !dims.is_boundary(i) {
+                continue;
+            }
 
             let idx = i as usize;
 
@@ -817,12 +867,18 @@ impl NeuronPool {
         let radius_sq = 4u32 + 1; // distance_sq <= 4 (radius ~2 voxels)
 
         for i in 0..n {
-            if !dims.is_boundary(i) { continue; }
+            if !dims.is_boundary(i) {
+                continue;
+            }
 
             let src_flags = self.neurons.flags[i as usize];
             for j in 0..n {
-                if i == j { continue; }
-                if dims.is_boundary(j) { continue; } // sentinel→sentinel not needed
+                if i == j {
+                    continue;
+                }
+                if dims.is_boundary(j) {
+                    continue;
+                } // sentinel→sentinel not needed
 
                 let d_sq = dims.distance_sq(i, j);
                 if d_sq <= radius_sq {
@@ -877,7 +933,9 @@ impl NeuronPool {
         let mut shuffled = eligible.clone();
         let mut rng = seed;
         let lcg = |s: &mut u64| -> u64 {
-            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *s >> 33
         };
         for i in (1..shuffled.len()).rev() {
@@ -904,7 +962,11 @@ impl NeuronPool {
 
         let mut specialized = 0u32;
         assign(spec.gate_pct, NeuronType::Gate, &mut specialized);
-        assign(spec.oscillator_pct, NeuronType::Oscillator, &mut specialized);
+        assign(
+            spec.oscillator_pct,
+            NeuronType::Oscillator,
+            &mut specialized,
+        );
         assign(spec.sensory_pct, NeuronType::Sensory, &mut specialized);
         assign(spec.motor_pct, NeuronType::Motor, &mut specialized);
 
@@ -919,7 +981,9 @@ impl NeuronPool {
         if specialized > 0 {
             log::debug!(
                 "[TYPE_SEED] {}: specialized {} of {} eligible neurons",
-                self.name, specialized, total
+                self.name,
+                specialized,
+                total
             );
         }
 
@@ -942,7 +1006,9 @@ impl NeuronPool {
         // LCG for deterministic jitter (oscillator period variation)
         let mut rng = seed;
         let lcg = |s: &mut u64| -> u64 {
-            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *s >> 33
         };
 
@@ -951,7 +1017,9 @@ impl NeuronPool {
         let mut gate_total = 0u32;
         let mut oscillator_total = 0u32;
         for i in 0..n {
-            if self.neurons.binding_slot[i] != 0 { continue; }
+            if self.neurons.binding_slot[i] != 0 {
+                continue;
+            }
             match flags::neuron_type(self.neurons.flags[i]) {
                 NeuronType::Sensory => sensory_total += 1,
                 NeuronType::Gate => gate_total += 1,
@@ -966,24 +1034,27 @@ impl NeuronPool {
         let mut oscillator_idx = 0u32;
 
         for i in 0..n {
-            if self.neurons.binding_slot[i] != 0 { continue; }
+            if self.neurons.binding_slot[i] != 0 {
+                continue;
+            }
 
             let ntype = flags::neuron_type(self.neurons.flags[i]);
             let config = match ntype {
                 NeuronType::Sensory => {
                     // Distribute offsets evenly across field width
                     let offset = if sensory_total > 1 {
-                        (sensory_idx as u32 * spec.sensory_field_width as u32
-                            / sensory_total) as u16
+                        (sensory_idx as u32 * spec.sensory_field_width as u32 / sensory_total)
+                            as u16
                     } else {
                         0
                     };
                     sensory_idx += 1;
                     Some(BindingConfig::sensory(spec.sensory_field_id, offset))
                 }
-                NeuronType::Motor => {
-                    Some(BindingConfig::motor(spec.motor_channel_id, spec.motor_scale))
-                }
+                NeuronType::Motor => Some(BindingConfig::motor(
+                    spec.motor_channel_id,
+                    spec.motor_scale,
+                )),
                 NeuronType::Gate => {
                     // Cycle through available chemicals
                     let chem = if spec.gate_chemicals.is_empty() {
@@ -1012,21 +1083,21 @@ impl NeuronPool {
                         0
                     };
                     oscillator_idx += 1;
-                    Some(BindingConfig::oscillator(period, spec.oscillator_amplitude, phase))
-                }
-                NeuronType::MemoryReader => {
-                    Some(BindingConfig::memory_reader(
-                        spec.memory_bank_slot,
-                        spec.memory_query_dim,
-                        spec.memory_top_k,
+                    Some(BindingConfig::oscillator(
+                        period,
+                        spec.oscillator_amplitude,
+                        phase,
                     ))
                 }
-                NeuronType::MemoryMatcher => {
-                    Some(BindingConfig::memory_matcher(
-                        spec.memory_bank_slot,
-                        spec.memory_match_threshold,
-                    ))
-                }
+                NeuronType::MemoryReader => Some(BindingConfig::memory_reader(
+                    spec.memory_bank_slot,
+                    spec.memory_query_dim,
+                    spec.memory_top_k,
+                )),
+                NeuronType::MemoryMatcher => Some(BindingConfig::memory_matcher(
+                    spec.memory_bank_slot,
+                    spec.memory_match_threshold,
+                )),
                 _ => None, // Computational, Relay — no binding needed
             };
 
@@ -1038,7 +1109,8 @@ impl NeuronPool {
                     // BindingTable full (255 entries) — stop binding
                     log::warn!(
                         "[BINDING] {}: binding table full after {} entries",
-                        self.name, bound
+                        self.name,
+                        bound
                     );
                     break;
                 }
@@ -1048,8 +1120,11 @@ impl NeuronPool {
         if bound > 0 {
             log::debug!(
                 "[BINDING] {}: bound {} neurons (S={}, G={}, O={}, M+M={}+{})",
-                self.name, bound,
-                sensory_idx, gate_idx, oscillator_idx,
+                self.name,
+                bound,
+                sensory_idx,
+                gate_idx,
+                oscillator_idx,
                 sensory_total.min(bound), // approximate — counts include unbound
                 gate_total.min(bound),
             );
@@ -1094,7 +1169,9 @@ impl NeuronPool {
 
             // 2b. Leak: membrane += (resting - membrane) >> (8 - leak.min(7))
             let leak_shift = 8u32.saturating_sub(self.neurons.leak[i].min(7) as u32);
-            let leak_current = (self.config.resting_potential as i32 - self.neurons.membrane[i] as i32) >> leak_shift;
+            let leak_current = (self.config.resting_potential as i32
+                - self.neurons.membrane[i] as i32)
+                >> leak_shift;
             self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(leak_current as i16);
 
             // 2b2. Spontaneous depolarization: small random membrane bump.
@@ -1102,7 +1179,10 @@ impl NeuronPool {
             // postsynaptic potentials, and metabolic fluctuations create baseline
             // activity that breaks synchrony and enables stochastic resonance.
             if self.config.spontaneous_rate > 0 {
-                let spont_seed = self.tick_count.wrapping_mul(0x9E3779B97F4A7C15).wrapping_add(i as u64);
+                let spont_seed = self
+                    .tick_count
+                    .wrapping_mul(0x9E3779B97F4A7C15)
+                    .wrapping_add(i as u64);
                 let spont_hash = (spont_seed ^ (spont_seed >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
                 if (spont_hash % 256) < self.config.spontaneous_rate as u64 {
                     // Small depolarization: 0-1023 in Q8.8 (~0-4mV). Enough to
@@ -1115,15 +1195,18 @@ impl NeuronPool {
 
             // 2c. Add external input
             if i < input_currents.len() {
-                self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(input_currents[i]);
+                self.neurons.membrane[i] =
+                    self.neurons.membrane[i].saturating_add(input_currents[i]);
             }
 
             // 2d. Add synaptic current
-            self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(self.synaptic_current[i]);
+            self.neurons.membrane[i] =
+                self.neurons.membrane[i].saturating_add(self.synaptic_current[i]);
 
             // 2d2. Add inter-regional projection current
             if self.projection_current[i] != 0 {
-                self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(self.projection_current[i]);
+                self.neurons.membrane[i] =
+                    self.neurons.membrane[i].saturating_add(self.projection_current[i]);
                 self.projection_current[i] = 0;
             }
 
@@ -1134,7 +1217,8 @@ impl NeuronPool {
                 NeuronType::Sensory if binding_slot > 0 => {
                     if let Some(cfg) = self.bindings.get(binding_slot) {
                         let sensory_current = io.read_sensory(cfg.target, cfg.sensory_offset());
-                        self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(sensory_current);
+                        self.neurons.membrane[i] =
+                            self.neurons.membrane[i].saturating_add(sensory_current);
                     }
                 }
                 NeuronType::Gate if binding_slot > 0 => {
@@ -1142,7 +1226,8 @@ impl NeuronPool {
                         let chem_level = io.read_chemical(cfg.target);
                         // Sensitivity modulates threshold: high chemical → lower threshold
                         let modulation = (chem_level as i32 * cfg.param_a as i32) / 256;
-                        self.neurons.threshold[i] = self.neurons.threshold[i].saturating_sub(modulation as i16);
+                        self.neurons.threshold[i] =
+                            self.neurons.threshold[i].saturating_sub(modulation as i16);
                     }
                 }
                 NeuronType::Oscillator if binding_slot > 0 => {
@@ -1152,7 +1237,8 @@ impl NeuronPool {
                         let phase_offset = cfg.param_b as u64;
                         // Ramp depolarization based on tick phase
                         let phase = (self.tick_count.wrapping_add(phase_offset)) % period;
-                        let ramp = ((amplitude * phase as i32) / period as i32).clamp(-32768, 32767) as i16;
+                        let ramp = ((amplitude * phase as i32) / period as i32).clamp(-32768, 32767)
+                            as i16;
                         self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(ramp);
                     }
                 }
@@ -1162,7 +1248,8 @@ impl NeuronPool {
                         if let Some(cfg) = self.bindings.get(binding_slot) {
                             let pattern = self.gather_local_pattern(i);
                             let boost = io.memory_match(cfg.target, &pattern);
-                            self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(boost);
+                            self.neurons.membrane[i] =
+                                self.neurons.membrane[i].saturating_add(boost);
                         }
                     }
                 }
@@ -1176,8 +1263,12 @@ impl NeuronPool {
             // pool-wide simultaneous firing.
             let effective_threshold = if self.config.threshold_jitter > 0 {
                 let jitter_range = self.config.threshold_jitter as i32;
-                let jitter_seed = self.tick_count.wrapping_mul(2654435761).wrapping_add(i as u64);
-                let jitter_hash = (jitter_seed ^ (jitter_seed >> 17)).wrapping_mul(0x94D049BB133111EB);
+                let jitter_seed = self
+                    .tick_count
+                    .wrapping_mul(2654435761)
+                    .wrapping_add(i as u64);
+                let jitter_hash =
+                    (jitter_seed ^ (jitter_seed >> 17)).wrapping_mul(0x94D049BB133111EB);
                 let jitter = ((jitter_hash as i32) % (jitter_range * 2 + 1)) - jitter_range;
                 self.neurons.threshold[i].saturating_add(jitter as i16)
             } else {
@@ -1190,13 +1281,15 @@ impl NeuronPool {
                 self.neurons.membrane[i] = self.config.reset_potential;
                 // Per-profile refractory: 0 = use profile default, non-zero = global override
                 self.neurons.refract_remaining[i] = if self.config.refractory_ticks == 0 {
-                    crate::neuron::NeuronProfile::from_flags(self.neurons.flags[i]).default_refractory()
+                    crate::neuron::NeuronProfile::from_flags(self.neurons.flags[i])
+                        .default_refractory()
                 } else {
                     self.config.refractory_ticks
                 };
 
                 // Post-synaptic trace bump (this neuron just fired)
-                self.neurons.trace[i] = self.neurons.trace[i].saturating_add(self.config.stdp_positive);
+                self.neurons.trace[i] =
+                    self.neurons.trace[i].saturating_add(self.config.stdp_positive);
 
                 // 2g. Type-specific post-spike behavior
                 match ntype {
@@ -1211,7 +1304,8 @@ impl NeuronPool {
                             let pattern = self.gather_local_pattern(i);
                             let result = io.memory_query(cfg.target, &pattern, cfg.param_b);
                             // Inject query result as current on next tick via direct membrane add
-                            self.neurons.membrane[i] = self.neurons.membrane[i].saturating_add(result);
+                            self.neurons.membrane[i] =
+                                self.neurons.membrane[i].saturating_add(result);
                         }
                     }
                     _ => {} // No post-spike action for other types
@@ -1224,7 +1318,8 @@ impl NeuronPool {
             }
 
             // 2h. Decay eligibility trace
-            self.neurons.trace[i] = ((self.neurons.trace[i] as i16 * self.config.trace_decay as i16) / 256) as i8;
+            self.neurons.trace[i] =
+                ((self.neurons.trace[i] as i16 * self.config.trace_decay as i16) / 256) as i8;
         }
 
         // 3. Propagate spikes through synapses
@@ -1236,7 +1331,9 @@ impl NeuronPool {
             let outgoing = self.synapses.outgoing_mut(i as u32);
             for syn in outgoing.iter_mut() {
                 let target = syn.target as usize;
-                if target >= n { continue; }
+                if target >= n {
+                    continue;
+                }
 
                 // STDP: pre-synaptic neuron just fired.
                 // Check if target ALSO fired this tick (anti-causal / simultaneous).
@@ -1264,7 +1361,8 @@ impl NeuronPool {
             for i in 0..n {
                 // Update running spike rate (exponential moving average)
                 let spiked = if self.neurons.spike_out[i] { 256u16 } else { 0 };
-                self.spike_rate[i] = ((self.spike_rate[i] as u32 * 255 + spiked as u32) / 256) as u16;
+                self.spike_rate[i] =
+                    ((self.spike_rate[i] as u32 * 255 + spiked as u32) / 256) as u16;
 
                 // Per-profile adaptation scale:
                 //   FastSpiking → 2x (interneurons adapt quickly to maintain fast inhibition)
@@ -1277,24 +1375,29 @@ impl NeuronPool {
                     _ => 1,
                 };
 
-                if adapt_scale == 0 { continue; }
+                if adapt_scale == 0 {
+                    continue;
+                }
                 let scaled_rate = rate * adapt_scale;
 
                 // Target rate: ~5% of ticks should produce a spike (= ~13 in Q8.8)
                 let target_rate = 13u16;
                 if self.spike_rate[i] > target_rate * 2 {
                     // Firing too much — raise threshold
-                    self.neurons.threshold[i] = self.neurons.threshold[i].saturating_add(scaled_rate);
+                    self.neurons.threshold[i] =
+                        self.neurons.threshold[i].saturating_add(scaled_rate);
                 } else if self.spike_rate[i] < target_rate / 2 {
                     // Too silent — lower threshold
-                    self.neurons.threshold[i] = self.neurons.threshold[i].saturating_sub(scaled_rate);
+                    self.neurons.threshold[i] =
+                        self.neurons.threshold[i].saturating_sub(scaled_rate);
                 }
             }
         }
 
         // 5. Decay synapse eligibility traces
         for syn in self.synapses.synapses.iter_mut() {
-            syn.eligibility = ((syn.eligibility as i16 * self.config.trace_decay as i16) / 256) as i8;
+            syn.eligibility =
+                ((syn.eligibility as i16 * self.config.trace_decay as i16) / 256) as i8;
         }
 
         self.last_spike_count = spike_count;
@@ -1307,7 +1410,8 @@ impl NeuronPool {
     /// Used by MemoryReader and MemoryMatcher to create query vectors.
     fn gather_local_pattern(&self, neuron_idx: usize) -> Vec<i16> {
         let outgoing = self.synapses.outgoing(neuron_idx as u32);
-        outgoing.iter()
+        outgoing
+            .iter()
             .take(8)
             .map(|syn| {
                 let t = syn.target as usize;
@@ -1459,7 +1563,9 @@ impl NeuronPool {
     /// For spatial pools, the grid's deepest dimension is extended to fit.
     /// Returns the number of neurons actually added.
     pub fn grow_neurons_seeded(&mut self, additional: u32, _seed: u64) -> u32 {
-        if additional == 0 { return 0; }
+        if additional == 0 {
+            return 0;
+        }
 
         let n_add = additional as usize;
         let n_exc = (additional * 4) / 5; // 80% excitatory
@@ -1474,13 +1580,19 @@ impl NeuronPool {
         );
 
         // Extend auxiliary per-neuron arrays
-        self.synaptic_current.extend(std::iter::repeat(0i16).take(n_add));
-        self.projection_current.extend(std::iter::repeat(0i16).take(n_add));
+        self.synaptic_current
+            .extend(std::iter::repeat(0i16).take(n_add));
+        self.projection_current
+            .extend(std::iter::repeat(0i16).take(n_add));
         self.spike_rate.extend(std::iter::repeat(0u16).take(n_add));
-        self.spike_window.extend(std::iter::repeat(false).take(n_add));
-        self.spike_window_count.extend(std::iter::repeat(0u8).take(n_add));
-        self.spike_counts.extend(std::iter::repeat(0u32).take(n_add));
-        self.chem_exposure.extend(std::iter::repeat(0u8).take(n_add));
+        self.spike_window
+            .extend(std::iter::repeat(false).take(n_add));
+        self.spike_window_count
+            .extend(std::iter::repeat(0u8).take(n_add));
+        self.spike_counts
+            .extend(std::iter::repeat(0u32).take(n_add));
+        self.chem_exposure
+            .extend(std::iter::repeat(0u8).take(n_add));
 
         // Extend delay buffer
         self.delay_buf.extend(n_add);
@@ -1510,7 +1622,9 @@ impl NeuronPool {
     /// Rebuilds the CSR synapse store to remap targets and remove dangling edges.
     /// Returns the number of neurons actually pruned.
     pub fn prune_neurons(&mut self, indices: &[u32]) -> u32 {
-        if indices.is_empty() { return 0; }
+        if indices.is_empty() {
+            return 0;
+        }
 
         let n_before = self.n_neurons as usize;
 
@@ -1521,7 +1635,9 @@ impl NeuronPool {
         // Filter out-of-bounds
         sorted.retain(|&i| i < n_before);
 
-        if sorted.is_empty() { return 0; }
+        if sorted.is_empty() {
+            return 0;
+        }
 
         let n_removed = sorted.len() as u32;
 
@@ -1550,11 +1666,15 @@ impl NeuronPool {
         // Rebuild CSR: collect surviving edges with remapped source/target indices
         let mut new_edges: Vec<(u32, Synapse)> = Vec::new();
         for src in 0..n_before {
-            if removed_set[src] { continue; }
+            if removed_set[src] {
+                continue;
+            }
             let outgoing = self.synapses.outgoing(src as u32);
             for syn in outgoing {
                 let tgt = syn.target as usize;
-                if tgt >= n_before || removed_set[tgt] { continue; }
+                if tgt >= n_before || removed_set[tgt] {
+                    continue;
+                }
                 let mut new_syn = *syn;
                 new_syn.target = remap[tgt] as u16;
                 new_edges.push((remap[src], new_syn));
@@ -1595,7 +1715,11 @@ impl NeuronPool {
         let mut exc = 0u32;
         let mut inh = 0u32;
         for &f in &self.neurons.flags {
-            if flags::is_inhibitory(f) { inh += 1; } else { exc += 1; }
+            if flags::is_inhibitory(f) {
+                inh += 1;
+            } else {
+                exc += 1;
+            }
         }
         self.n_neurons = n_after;
         self.n_excitatory = exc;
@@ -1627,7 +1751,9 @@ impl NeuronPool {
         }
 
         let n = self.n_neurons as usize;
-        if n < 4 { return 0; }
+        if n < 4 {
+            return 0;
+        }
 
         let max_swaps = (n / 32).max(1);
         let mut swaps = 0u32;
@@ -1635,7 +1761,9 @@ impl NeuronPool {
         // Simple LCG for tie-breaking
         let mut rng_state: u64 = seed ^ (self.tick_count.wrapping_mul(0xBEEF));
         let lcg_next = |state: &mut u64| -> u32 {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*state >> 33) as u32
         };
 
@@ -1647,9 +1775,13 @@ impl NeuronPool {
             let my_count = self.spike_counts[i];
             // Look for neighbors with much higher activity
             for j in 0..n {
-                if i == j { continue; }
+                if i == j {
+                    continue;
+                }
                 let d_sq = self.dims.distance_sq(i as u32, j as u32);
-                if d_sq > 3 { continue; } // Only immediate neighbors (distance <= sqrt(3))
+                if d_sq > 3 {
+                    continue;
+                } // Only immediate neighbors (distance <= sqrt(3))
 
                 let neighbor_count = self.spike_counts[j];
                 // Swap if neighbor has >2x activity and I have low activity
@@ -1669,8 +1801,12 @@ impl NeuronPool {
         let mut swapped = vec![false; n];
 
         for (low_idx, high_idx) in candidates {
-            if swaps >= max_swaps as u32 { break; }
-            if swapped[low_idx] || swapped[high_idx] { continue; }
+            if swaps >= max_swaps as u32 {
+                break;
+            }
+            if swapped[low_idx] || swapped[high_idx] {
+                continue;
+            }
 
             // Swap all SoA fields between the two neurons
             self.neurons.membrane.swap(low_idx, high_idx);
@@ -1749,7 +1885,8 @@ impl NeuronPool {
         if swaps > 0 {
             log::debug!(
                 "[MIGRATION] {}: {} position swaps performed",
-                self.name, swaps
+                self.name,
+                swaps
             );
         }
 
@@ -1793,9 +1930,13 @@ impl NeuronPool {
 
         // Resize arrays to checkpoint size
         self.neurons.flags.resize(n, 0);
-        self.neurons.threshold.resize(n, self.config.spike_threshold);
+        self.neurons
+            .threshold
+            .resize(n, self.config.spike_threshold);
         self.neurons.leak.resize(n, 0u8);
-        self.neurons.membrane.resize(n, self.config.resting_potential);
+        self.neurons
+            .membrane
+            .resize(n, self.config.resting_potential);
         self.neurons.refract_remaining.resize(n, 0);
         self.neurons.trace.resize(n, 0);
         self.spike_rate.resize(n, 0);
@@ -1831,7 +1972,10 @@ impl NeuronPool {
 
         log::debug!(
             "[ROLLBACK] {}: restored to gen {} ({} neurons, {} edges)",
-            self.name, cp.generation, cp.n_neurons, cp.edges.len()
+            self.name,
+            cp.generation,
+            cp.n_neurons,
+            cp.edges.len()
         );
     }
 
@@ -1864,14 +2008,20 @@ impl NeuronPool {
             // Linear interpolation between struggle and elite
             let range = evo.elite_threshold.saturating_sub(evo.struggle_threshold) as u16;
             let pos = fitness_before.saturating_sub(evo.struggle_threshold) as u16;
-            let prob_range = evo.struggle_mutation_prob.saturating_sub(evo.elite_mutation_prob) as u16;
+            let prob_range = evo
+                .struggle_mutation_prob
+                .saturating_sub(evo.elite_mutation_prob) as u16;
             (evo.struggle_mutation_prob as u16 - (pos * prob_range / range.max(1))) as u8
         };
 
         // Simple LCG seeded PRNG
-        let mut rng = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        let mut rng = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let lcg_next = |state: &mut u64| -> u32 {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*state >> 33) as u32
         };
 
@@ -1901,13 +2051,19 @@ impl NeuronPool {
             let mutation_type = if fitness.active_ratio < 0.05 && mutation_roll < 40 {
                 // Nearly silent → grow neurons
                 MutationType::NeuronGrow
-            } else if fitness.active_ratio > 0.50 && fitness_before < evo.struggle_threshold && mutation_roll < 30 {
+            } else if fitness.active_ratio > 0.50
+                && fitness_before < evo.struggle_threshold
+                && mutation_roll < 30
+            {
                 // Hyperactive + low fitness → prune dead neurons
                 MutationType::NeuronPrune
             } else if fitness.synapse_density < 0.15 && mutation_roll < 40 {
                 // Very sparse → regrow synapses
                 MutationType::SynapseRegrow
-            } else if fitness.synapse_density > 0.70 && fitness_before < evo.struggle_threshold && mutation_roll < 30 {
+            } else if fitness.synapse_density > 0.70
+                && fitness_before < evo.struggle_threshold
+                && mutation_roll < 30
+            {
                 // Dense but struggling → prune weak synapses
                 MutationType::SynapsePrune
             } else if mutation_roll < 60 {
@@ -1922,7 +2078,10 @@ impl NeuronPool {
             let magnitude = match mutation_type {
                 MutationType::NeuronGrow => {
                     let to_grow = ((lcg_next(&mut rng) % 4) + 1).min(
-                        self.config.growth.max_neurons.saturating_sub(self.n_neurons)
+                        self.config
+                            .growth
+                            .max_neurons
+                            .saturating_sub(self.n_neurons),
                     );
                     if to_grow > 0 {
                         let grown = self.grow_neurons_seeded(to_grow, lcg_next(&mut rng) as u64);
@@ -2004,7 +2163,10 @@ impl NeuronPool {
 
             log::debug!(
                 "[EVOLVE] {}: gen {} ROLLBACK (fitness {} → {} regressed)",
-                self.name, self.generation, fitness_before, fitness_after
+                self.name,
+                self.generation,
+                fitness_before,
+                fitness_after
             );
 
             return EvolutionResult {
@@ -2016,7 +2178,13 @@ impl NeuronPool {
         }
 
         // Update journal entries with actual fitness_after
-        for entry in self.journal.entries.iter_mut().rev().take(mutations_applied as usize) {
+        for entry in self
+            .journal
+            .entries
+            .iter_mut()
+            .rev()
+            .take(mutations_applied as usize)
+        {
             entry.fitness_after = fitness_after;
         }
 
@@ -2024,7 +2192,11 @@ impl NeuronPool {
 
         log::debug!(
             "[EVOLVE] {}: gen {} fitness {} → {} ({} mutations)",
-            self.name, self.generation, fitness_before, fitness_after, mutations_applied
+            self.name,
+            self.generation,
+            fitness_before,
+            fitness_after,
+            mutations_applied
         );
 
         EvolutionResult {
@@ -2098,7 +2270,8 @@ impl NeuronPool {
     ///
     /// Must be called after pool creation to enable spatial operations.
     pub fn init_spatial(&mut self, bounds: [f32; 3]) {
-        self.neurons.init_spatial_from_grid(bounds, (self.dims.w, self.dims.h, self.dims.d));
+        self.neurons
+            .init_spatial_from_grid(bounds, (self.dims.w, self.dims.h, self.dims.d));
         self.spatial_bounds = Some(bounds);
     }
 
@@ -2219,7 +2392,10 @@ impl NeuronPool {
     ///
     /// Returns number of neurons pruned.
     pub fn prune_dead_axons(&mut self) -> usize {
-        let mut dead_indices: Vec<usize> = self.neurons.axon_health.iter()
+        let mut dead_indices: Vec<usize> = self
+            .neurons
+            .axon_health
+            .iter()
             .enumerate()
             .filter(|(_, &h)| h == 0)
             .map(|(i, _)| i)
@@ -2255,7 +2431,8 @@ impl NeuronPool {
         };
 
         // Get neuron type distribution for this template (for future use)
-        let (_n_comp, _n_gate, _n_osc, _n_mem, _n_sens, _n_mot) = request.template_type.type_distribution();
+        let (_n_comp, _n_gate, _n_osc, _n_mem, _n_sens, _n_mot) =
+            request.template_type.type_distribution();
         let total_neurons = request.template_type.neuron_count();
 
         if total_neurons == 0 {
@@ -2277,7 +2454,10 @@ impl NeuronPool {
 
         // Spawn arrangement depends on template type
         match request.template_type {
-            TemplateType::LateralInhibition { scale, surround_ratio } => {
+            TemplateType::LateralInhibition {
+                scale,
+                surround_ratio,
+            } => {
                 // Center neurons in a cluster
                 for i in 0..scale {
                     let offset = [
@@ -2444,7 +2624,12 @@ impl NeuronPool {
         // Extend neurons array
         let is_excitatory = ntype != NeuronType::Gate; // Gates are inhibitory
         let n_exc = if is_excitatory { 1 } else { 0 };
-        self.neurons.extend(1, n_exc, self.config.resting_potential, self.config.spike_threshold);
+        self.neurons.extend(
+            1,
+            n_exc,
+            self.config.resting_potential,
+            self.config.spike_threshold,
+        );
 
         let idx = self.neurons.len() - 1;
 
@@ -2599,12 +2784,7 @@ impl NeuronPool {
     /// "dog" [100, 111, 103] activates neurons 100, 111, 103.
     ///
     /// Returns number of neurons stimulated.
-    pub fn inject_sensory(
-        &mut self,
-        template_id: u32,
-        input_bytes: &[u8],
-        current: i16,
-    ) -> usize {
+    pub fn inject_sensory(&mut self, template_id: u32, input_bytes: &[u8], current: i16) -> usize {
         let template = match self.templates.get(template_id) {
             Some(t) => t,
             None => return 0,
@@ -2656,16 +2836,30 @@ impl NeuronPool {
     /// and physical proximity drive wiring.
     ///
     /// Returns number of synapses created.
-    pub fn wire_inter_template(&mut self, max_distance: f32, base_probability: f32, seed: u64) -> usize {
+    pub fn wire_inter_template(
+        &mut self,
+        max_distance: f32,
+        base_probability: f32,
+        seed: u64,
+    ) -> usize {
         // Collect all need/offer pairs
         let mut connections_to_make: Vec<(usize, usize, f32)> = Vec::new();
         let mut rng = seed;
 
         // Get all template data upfront to avoid borrow issues
-        let template_data: Vec<(u32, Vec<usize>, [f32; 3], SignalType, SignalType)> = self.templates
+        let template_data: Vec<(u32, Vec<usize>, [f32; 3], SignalType, SignalType)> = self
+            .templates
             .all()
             .iter()
-            .map(|t| (t.id, t.neuron_indices.clone(), t.centroid, t.input_signal, t.output_signal))
+            .map(|t| {
+                (
+                    t.id,
+                    t.neuron_indices.clone(),
+                    t.centroid,
+                    t.input_signal,
+                    t.output_signal,
+                )
+            })
             .collect();
 
         // For each pair of templates, check if one offers what the other needs
@@ -2812,7 +3006,8 @@ impl NeuronPool {
                         (proximity * 12.0) as i8 // Max +12
                     } else {
                         // All others: strong inhibition
-                        let remoteness = ((dist - excite_radius) / (max_dist - excite_radius)).min(1.0);
+                        let remoteness =
+                            ((dist - excite_radius) / (max_dist - excite_radius)).min(1.0);
                         let inh = 20 + (remoteness * 40.0) as i8; // -20 to -60
                         -(inh.min(60))
                     };
@@ -3348,18 +3543,32 @@ mod tests {
         let pool = NeuronPool::with_random_connectivity("test", 100, 0.05, PoolConfig::default());
         assert!(pool.synapse_count() > 0, "should have some connections");
         // With 100 neurons and 5% density, expect ~500 synapses (100*99*0.05)
-        assert!(pool.synapse_count() > 100, "should have reasonable connectivity");
+        assert!(
+            pool.synapse_count() > 100,
+            "should have reasonable connectivity"
+        );
     }
 
     #[test]
     fn seeded_connectivity_is_deterministic() {
-        let a = NeuronPool::with_random_connectivity_seeded("a", 64, 0.05, PoolConfig::default(), 42);
-        let b = NeuronPool::with_random_connectivity_seeded("b", 64, 0.05, PoolConfig::default(), 42);
-        assert_eq!(a.synapse_count(), b.synapse_count(), "same seed = same synapse count");
+        let a =
+            NeuronPool::with_random_connectivity_seeded("a", 64, 0.05, PoolConfig::default(), 42);
+        let b =
+            NeuronPool::with_random_connectivity_seeded("b", 64, 0.05, PoolConfig::default(), 42);
+        assert_eq!(
+            a.synapse_count(),
+            b.synapse_count(),
+            "same seed = same synapse count"
+        );
         // Different seed = different topology
-        let c = NeuronPool::with_random_connectivity_seeded("c", 64, 0.05, PoolConfig::default(), 99);
+        let c =
+            NeuronPool::with_random_connectivity_seeded("c", 64, 0.05, PoolConfig::default(), 99);
         // Extremely unlikely to match (but possible in theory)
-        assert_ne!(a.synapse_count(), c.synapse_count(), "different seed should differ");
+        assert_ne!(
+            a.synapse_count(),
+            c.synapse_count(),
+            "different seed should differ"
+        );
     }
 
     #[test]
@@ -3393,14 +3602,23 @@ mod tests {
 
         // During refractory period, even strong input shouldn't spike
         pool.tick_simple(&input);
-        assert!(!pool.neurons.spike_out[0], "should NOT spike during refractory");
+        assert!(
+            !pool.neurons.spike_out[0],
+            "should NOT spike during refractory"
+        );
 
         pool.tick_simple(&input);
-        assert!(!pool.neurons.spike_out[0], "should NOT spike during refractory (tick 2)");
+        assert!(
+            !pool.neurons.spike_out[0],
+            "should NOT spike during refractory (tick 2)"
+        );
 
         // After refractory period (2 ticks), should spike again
         pool.tick_simple(&input);
-        assert!(pool.neurons.spike_out[0], "should spike again after refractory");
+        assert!(
+            pool.neurons.spike_out[0],
+            "should spike again after refractory"
+        );
     }
 
     #[test]
@@ -3424,9 +3642,17 @@ mod tests {
         // Simulates the regulation shared pool: 256 neurons, 5% density,
         // inject into 0..32, read from 57..64 after 10 ticks.
         let mut pool = NeuronPool::with_random_connectivity_seeded(
-            "regulation", 256, 0.05, PoolConfig::default(), 0xDEAD_BEEF,
+            "regulation",
+            256,
+            0.05,
+            PoolConfig::default(),
+            0xDEAD_BEEF,
         );
-        eprintln!("Pool: {} neurons, {} synapses", pool.n_neurons, pool.synapse_count());
+        eprintln!(
+            "Pool: {} neurons, {} synapses",
+            pool.n_neurons,
+            pool.synapse_count()
+        );
 
         // Inject strong signal (magnitude 40 → current 5120 > threshold gap 3840)
         pool.inject(0..32, Signal::positive(40));
@@ -3436,13 +3662,19 @@ mod tests {
             let spikes = pool.spike_count();
             let out = pool.read_output(57..64);
             let out_fired: usize = out.iter().filter(|s| s.is_positive()).count();
-            eprintln!("  tick {}: spikes={} output_57_63_fired={}", t, spikes, out_fired);
+            eprintln!(
+                "  tick {}: spikes={} output_57_63_fired={}",
+                t, spikes, out_fired
+            );
         }
 
         let output = pool.read_output(57..64);
         let fired: usize = output.iter().filter(|s| s.is_positive()).count();
-        eprintln!("Final output 57-63: {:?} ({} fired)",
-            output.iter().map(|s| s.as_signed_i32()).collect::<Vec<_>>(), fired);
+        eprintln!(
+            "Final output 57-63: {:?} ({} fired)",
+            output.iter().map(|s| s.as_signed_i32()).collect::<Vec<_>>(),
+            fired
+        );
 
         // Second injection (simulating program 2 injecting into same range)
         pool.inject(0..32, Signal::positive(40));
@@ -3451,13 +3683,22 @@ mod tests {
             let spikes = pool.spike_count();
             let out = pool.read_output(57..64);
             let out_fired: usize = out.iter().filter(|s| s.is_positive()).count();
-            eprintln!("  pass2 tick {}: spikes={} output_57_63_fired={}", t, spikes, out_fired);
+            eprintln!(
+                "  pass2 tick {}: spikes={} output_57_63_fired={}",
+                t, spikes, out_fired
+            );
         }
 
         let output2 = pool.read_output(57..64);
         let fired2: usize = output2.iter().filter(|s| s.is_positive()).count();
-        eprintln!("Pass2 output 57-63: {:?} ({} fired)",
-            output2.iter().map(|s| s.as_signed_i32()).collect::<Vec<_>>(), fired2);
+        eprintln!(
+            "Pass2 output 57-63: {:?} ({} fired)",
+            output2
+                .iter()
+                .map(|s| s.as_signed_i32())
+                .collect::<Vec<_>>(),
+            fired2
+        );
     }
 
     // ====================================================================
@@ -3496,9 +3737,25 @@ mod tests {
     #[test]
     fn spatial_connectivity_deterministic() {
         let dims = SpatialDims::new(4, 4, 4);
-        let a = NeuronPool::with_spatial_connectivity_seeded("a", dims, 0.05, PoolConfig::default(), 42);
-        let b = NeuronPool::with_spatial_connectivity_seeded("b", dims, 0.05, PoolConfig::default(), 42);
-        assert_eq!(a.synapse_count(), b.synapse_count(), "same seed = same topology");
+        let a = NeuronPool::with_spatial_connectivity_seeded(
+            "a",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
+        let b = NeuronPool::with_spatial_connectivity_seeded(
+            "b",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
+        assert_eq!(
+            a.synapse_count(),
+            b.synapse_count(),
+            "same seed = same topology"
+        );
         assert_eq!(a.dims, dims);
     }
 
@@ -3506,7 +3763,13 @@ mod tests {
     fn spatial_local_bias() {
         // Nearby neurons should be connected more than distant ones
         let dims = SpatialDims::new(8, 8, 4);
-        let pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 99);
+        let pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            99,
+        );
 
         // Count connections from neuron 0 to neighbors (d_sq <= 3) vs far (d_sq > 20)
         let outgoing = pool.synapses.outgoing(0);
@@ -3520,9 +3783,19 @@ mod tests {
                 far += 1;
             }
         }
-        eprintln!("[SPATIAL] Neuron 0: near={}, far={}, total={}", near, far, outgoing.len());
+        eprintln!(
+            "[SPATIAL] Neuron 0: near={}, far={}, total={}",
+            near,
+            far,
+            outgoing.len()
+        );
         // With Gaussian falloff, near should dominate
-        assert!(near >= far, "Gaussian: near connections ({}) should >= far connections ({})", near, far);
+        assert!(
+            near >= far,
+            "Gaussian: near connections ({}) should >= far connections ({})",
+            near,
+            far
+        );
     }
 
     #[test]
@@ -3530,22 +3803,36 @@ mod tests {
         let dims = SpatialDims::new(4, 4, 4);
         let n = dims.total() as f32;
         let target_density = 0.05f32;
-        let pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, target_density, PoolConfig::default(), 77);
+        let pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            target_density,
+            PoolConfig::default(),
+            77,
+        );
 
         let actual_density = pool.synapse_count() as f32 / (n * (n - 1.0));
-        eprintln!("[SPATIAL] Target density: {}, Actual density: {:.4}, synapses: {}", target_density, actual_density, pool.synapse_count());
+        eprintln!(
+            "[SPATIAL] Target density: {}, Actual density: {:.4}, synapses: {}",
+            target_density,
+            actual_density,
+            pool.synapse_count()
+        );
         // Gaussian normalization targets the requested density. Small grids may
         // deviate more due to discrete sampling. Allow 3x tolerance.
         assert!(
             actual_density > target_density * 0.3 && actual_density < target_density * 3.0,
-            "Density {:.4} should be in reasonable range of target {}", actual_density, target_density
+            "Density {:.4} should be in reasonable range of target {}",
+            actual_density,
+            target_density
         );
     }
 
     #[test]
     fn flat_constructor_unchanged() {
         // Old constructor should produce flat dims and identical results
-        let a = NeuronPool::with_random_connectivity_seeded("a", 64, 0.05, PoolConfig::default(), 42);
+        let a =
+            NeuronPool::with_random_connectivity_seeded("a", 64, 0.05, PoolConfig::default(), 42);
         assert_eq!(a.dims, SpatialDims::flat(64));
         assert!(a.synapse_count() > 0);
     }
@@ -3554,19 +3841,31 @@ mod tests {
     fn sentinel_inhibits_boundary() {
         // Sentinels require all axes >= 6 (otherwise skipped to avoid over-inhibition)
         let dims = SpatialDims::new(6, 6, 6);
-        let pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 55);
+        let pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            55,
+        );
 
         // Boundary neurons should be inhibitory
         let boundary_count = (0..dims.total()).filter(|&i| dims.is_boundary(i)).count();
         let interior_count = dims.total() as usize - boundary_count;
-        eprintln!("[SENTINEL] Boundary: {}, Interior: {} (6x6x6 = {})", boundary_count, interior_count, dims.total());
+        eprintln!(
+            "[SENTINEL] Boundary: {}, Interior: {} (6x6x6 = {})",
+            boundary_count,
+            interior_count,
+            dims.total()
+        );
 
         // Check all boundary neurons are inhibitory
         for i in 0..dims.total() {
             if dims.is_boundary(i) {
                 assert!(
                     crate::neuron::flags::is_inhibitory(pool.neurons.flags[i as usize]),
-                    "Boundary neuron {} should be inhibitory", i
+                    "Boundary neuron {} should be inhibitory",
+                    i
                 );
             }
         }
@@ -3576,14 +3875,23 @@ mod tests {
             .filter(|&i| dims.is_boundary(i))
             .map(|i| pool.synapses.outgoing(i).len())
             .sum();
-        assert!(sentinel_synapses > 0, "Sentinels should have outgoing connections");
+        assert!(
+            sentinel_synapses > 0,
+            "Sentinels should have outgoing connections"
+        );
     }
 
     #[test]
     fn small_grid_skips_sentinels() {
         // Grids with any axis < 6 skip sentinel placement to avoid over-inhibition
         let dims = SpatialDims::new(4, 4, 4);
-        let pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 55);
+        let pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            55,
+        );
 
         // No boundary neurons should be marked inhibitory by sentinels
         // (some may be randomly inhibitory from the base constructor)
@@ -3593,10 +3901,14 @@ mod tests {
             .collect();
 
         // At least some boundary neurons should be excitatory (not all forced inhibitory)
-        let exc_boundary = boundary_flags.iter()
+        let exc_boundary = boundary_flags
+            .iter()
             .filter(|&&f| !crate::neuron::flags::is_inhibitory(f))
             .count();
-        assert!(exc_boundary > 0, "Small grid should have excitatory boundary neurons (no sentinels)");
+        assert!(
+            exc_boundary > 0,
+            "Small grid should have excitatory boundary neurons (no sentinels)"
+        );
     }
 
     // ====================================================================
@@ -3605,16 +3917,26 @@ mod tests {
 
     #[test]
     fn neuron_type_encoding() {
-        use crate::neuron::{NeuronProfile, NeuronType, flags};
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
 
         // Round-trip all types
         for ntype in [
-            NeuronType::Computational, NeuronType::Sensory, NeuronType::Motor,
-            NeuronType::MemoryReader, NeuronType::MemoryMatcher,
-            NeuronType::Gate, NeuronType::Relay, NeuronType::Oscillator,
+            NeuronType::Computational,
+            NeuronType::Sensory,
+            NeuronType::Motor,
+            NeuronType::MemoryReader,
+            NeuronType::MemoryMatcher,
+            NeuronType::Gate,
+            NeuronType::Relay,
+            NeuronType::Oscillator,
         ] {
             let f = flags::encode_full(false, NeuronProfile::RegularSpiking, ntype);
-            assert_eq!(flags::neuron_type(f), ntype, "Round-trip failed for {:?}", ntype);
+            assert_eq!(
+                flags::neuron_type(f),
+                ntype,
+                "Round-trip failed for {:?}",
+                ntype
+            );
             assert!(flags::is_excitatory(f));
             assert_eq!(NeuronProfile::from_flags(f), NeuronProfile::RegularSpiking);
         }
@@ -3628,8 +3950,10 @@ mod tests {
 
     #[test]
     fn tick_with_null_io_same_as_tick_simple() {
-        let mut pool_a = NeuronPool::with_random_connectivity_seeded("a", 32, 0.05, PoolConfig::default(), 42);
-        let mut pool_b = NeuronPool::with_random_connectivity_seeded("b", 32, 0.05, PoolConfig::default(), 42);
+        let mut pool_a =
+            NeuronPool::with_random_connectivity_seeded("a", 32, 0.05, PoolConfig::default(), 42);
+        let mut pool_b =
+            NeuronPool::with_random_connectivity_seeded("b", 32, 0.05, PoolConfig::default(), 42);
 
         let input = vec![5000i16; 32];
         pool_a.tick_simple(&input);
@@ -3638,31 +3962,43 @@ mod tests {
         // Both should produce identical results
         assert_eq!(pool_a.spike_count(), pool_b.spike_count());
         for i in 0..32 {
-            assert_eq!(pool_a.neurons.membrane[i], pool_b.neurons.membrane[i],
-                "membrane mismatch at neuron {}", i);
+            assert_eq!(
+                pool_a.neurons.membrane[i], pool_b.neurons.membrane[i],
+                "membrane mismatch at neuron {}",
+                i
+            );
         }
     }
 
     #[test]
     fn sensory_neuron_reads_input() {
         use crate::binding::BindingConfig;
-        use crate::neuron::{NeuronProfile, NeuronType, flags};
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
 
         let mut pool = NeuronPool::new("test", 4, PoolConfig::default());
 
         // Make neuron 0 a Sensory neuron
-        pool.neurons.flags[0] = flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Sensory);
+        pool.neurons.flags[0] =
+            flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Sensory);
         let slot = pool.bindings.add(BindingConfig::sensory(1, 0)).unwrap();
         pool.neurons.binding_slot[0] = slot;
 
         // Custom IO that returns a known sensory value
         struct TestIO;
         impl NeuronIO for TestIO {
-            fn read_sensory(&self, _field_id: u8, _offset: u16) -> i16 { 5000 }
+            fn read_sensory(&self, _field_id: u8, _offset: u16) -> i16 {
+                5000
+            }
             fn write_motor(&mut self, _: u8, _: i16) {}
-            fn memory_query(&mut self, _: u8, _: &[i16], _: u8) -> i16 { 0 }
-            fn memory_match(&self, _: u8, _: &[i16]) -> i16 { 0 }
-            fn read_chemical(&self, _: u8) -> u8 { 0 }
+            fn memory_query(&mut self, _: u8, _: &[i16], _: u8) -> i16 {
+                0
+            }
+            fn memory_match(&self, _: u8, _: &[i16]) -> i16 {
+                0
+            }
+            fn read_chemical(&self, _: u8) -> u8 {
+                0
+            }
         }
 
         let baseline_membrane = pool.neurons.membrane[0];
@@ -3672,35 +4008,50 @@ mod tests {
         // (it might have spiked, so check either membrane changed or spike occurred)
         let spiked = pool.neurons.spike_out[0];
         let membrane_changed = pool.neurons.membrane[0] != baseline_membrane;
-        assert!(spiked || membrane_changed,
-            "Sensory neuron should respond to read_sensory input");
+        assert!(
+            spiked || membrane_changed,
+            "Sensory neuron should respond to read_sensory input"
+        );
     }
 
     #[test]
     fn motor_neuron_fires_output() {
         use crate::binding::BindingConfig;
-        use crate::neuron::{NeuronProfile, NeuronType, flags};
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
         use std::cell::Cell;
 
         let mut pool = NeuronPool::new("test", 4, PoolConfig::default());
 
         // Make neuron 0 a Motor neuron
-        pool.neurons.flags[0] = flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Motor);
+        pool.neurons.flags[0] =
+            flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Motor);
         let slot = pool.bindings.add(BindingConfig::motor(0, 128)).unwrap();
         pool.neurons.binding_slot[0] = slot;
 
-        struct MotorTestIO { wrote: Cell<bool> }
+        struct MotorTestIO {
+            wrote: Cell<bool>,
+        }
         impl NeuronIO for MotorTestIO {
-            fn read_sensory(&self, _: u8, _: u16) -> i16 { 0 }
+            fn read_sensory(&self, _: u8, _: u16) -> i16 {
+                0
+            }
             fn write_motor(&mut self, _channel: u8, _magnitude: i16) {
                 self.wrote.set(true);
             }
-            fn memory_query(&mut self, _: u8, _: &[i16], _: u8) -> i16 { 0 }
-            fn memory_match(&self, _: u8, _: &[i16]) -> i16 { 0 }
-            fn read_chemical(&self, _: u8) -> u8 { 0 }
+            fn memory_query(&mut self, _: u8, _: &[i16], _: u8) -> i16 {
+                0
+            }
+            fn memory_match(&self, _: u8, _: &[i16]) -> i16 {
+                0
+            }
+            fn read_chemical(&self, _: u8) -> u8 {
+                0
+            }
         }
 
-        let mut io = MotorTestIO { wrote: Cell::new(false) };
+        let mut io = MotorTestIO {
+            wrote: Cell::new(false),
+        };
 
         // Force neuron 0 to spike
         let mut input = vec![0i16; 4];
@@ -3708,28 +4059,40 @@ mod tests {
         pool.tick(&input, &mut io);
 
         assert!(pool.neurons.spike_out[0], "Motor neuron should spike");
-        assert!(io.wrote.get(), "Motor neuron should have called write_motor on spike");
+        assert!(
+            io.wrote.get(),
+            "Motor neuron should have called write_motor on spike"
+        );
     }
 
     #[test]
     fn gate_neuron_chemical_modulation() {
         use crate::binding::BindingConfig;
-        use crate::neuron::{NeuronProfile, NeuronType, flags};
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
 
         let mut pool = NeuronPool::new("test", 4, PoolConfig::default());
 
         // Make neuron 0 a Gate neuron
-        pool.neurons.flags[0] = flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Gate);
+        pool.neurons.flags[0] =
+            flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Gate);
         let slot = pool.bindings.add(BindingConfig::gate(0, 200)).unwrap();
         pool.neurons.binding_slot[0] = slot;
 
         struct ChemIO;
         impl NeuronIO for ChemIO {
-            fn read_sensory(&self, _: u8, _: u16) -> i16 { 0 }
+            fn read_sensory(&self, _: u8, _: u16) -> i16 {
+                0
+            }
             fn write_motor(&mut self, _: u8, _: i16) {}
-            fn memory_query(&mut self, _: u8, _: &[i16], _: u8) -> i16 { 0 }
-            fn memory_match(&self, _: u8, _: &[i16]) -> i16 { 0 }
-            fn read_chemical(&self, _chem: u8) -> u8 { 200 } // High chemical level
+            fn memory_query(&mut self, _: u8, _: &[i16], _: u8) -> i16 {
+                0
+            }
+            fn memory_match(&self, _: u8, _: &[i16]) -> i16 {
+                0
+            }
+            fn read_chemical(&self, _chem: u8) -> u8 {
+                200
+            } // High chemical level
         }
 
         let threshold_before = pool.neurons.threshold[0];
@@ -3737,21 +4100,28 @@ mod tests {
         let threshold_after = pool.neurons.threshold[0];
 
         // High chemical + high sensitivity should lower threshold
-        assert!(threshold_after < threshold_before,
+        assert!(
+            threshold_after < threshold_before,
             "Gate neuron threshold should decrease with high chemical (before={}, after={})",
-            threshold_before, threshold_after);
+            threshold_before,
+            threshold_after
+        );
     }
 
     #[test]
     fn oscillator_fires_periodically() {
         use crate::binding::BindingConfig;
-        use crate::neuron::{NeuronProfile, NeuronType, flags};
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
 
         let mut pool = NeuronPool::new("test", 1, PoolConfig::default());
 
         // Make neuron 0 an Oscillator with period=5, high amplitude
-        pool.neurons.flags[0] = flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Oscillator);
-        let slot = pool.bindings.add(BindingConfig::oscillator(5, 200, 0)).unwrap();
+        pool.neurons.flags[0] =
+            flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Oscillator);
+        let slot = pool
+            .bindings
+            .add(BindingConfig::oscillator(5, 200, 0))
+            .unwrap();
         pool.neurons.binding_slot[0] = slot;
 
         let mut spike_ticks = Vec::new();
@@ -3764,19 +4134,29 @@ mod tests {
 
         eprintln!("[OSCILLATOR] Spike ticks: {:?}", spike_ticks);
         // Oscillator should fire multiple times over 30 ticks
-        assert!(spike_ticks.len() >= 2,
-            "Oscillator should fire multiple times in 30 ticks (fired {} times)", spike_ticks.len());
+        assert!(
+            spike_ticks.len() >= 2,
+            "Oscillator should fire multiple times in 30 ticks (fired {} times)",
+            spike_ticks.len()
+        );
     }
 
     #[test]
     fn codec_v2_round_trip() {
         let dims = SpatialDims::new(4, 4, 4);
-        let mut pool = NeuronPool::with_spatial_connectivity_seeded("spatial", dims, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded(
+            "spatial",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
 
         // Add a binding
         use crate::binding::BindingConfig;
-        use crate::neuron::{NeuronProfile, NeuronType, flags};
-        pool.neurons.flags[0] = flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Sensory);
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
+        pool.neurons.flags[0] =
+            flags::encode_full(false, NeuronProfile::RegularSpiking, NeuronType::Sensory);
         let slot = pool.bindings.add(BindingConfig::sensory(3, 256)).unwrap();
         pool.neurons.binding_slot[0] = slot;
 
@@ -3791,7 +4171,10 @@ mod tests {
         let binding = loaded.bindings.get(slot).unwrap();
         assert_eq!(binding.target, 3);
         assert_eq!(binding.sensory_offset(), 256);
-        assert_eq!(flags::neuron_type(loaded.neurons.flags[0]), NeuronType::Sensory);
+        assert_eq!(
+            flags::neuron_type(loaded.neurons.flags[0]),
+            NeuronType::Sensory
+        );
 
         std::fs::remove_file(&path).ok();
     }
@@ -3815,19 +4198,34 @@ mod tests {
         pool.tick_simple(&input);
 
         assert!(pool.neurons.spike_out[0], "neuron 0 should have spiked");
-        assert_eq!(pool.neuron_activities()[0], 1, "spike_count for neuron 0 should be 1");
+        assert_eq!(
+            pool.neuron_activities()[0],
+            1,
+            "spike_count for neuron 0 should be 1"
+        );
         assert!(pool.active_neuron_count() >= 1);
 
         // Tick again — neuron 0 is in refractory, so no spike
         pool.tick_simple(&input);
         assert!(!pool.neurons.spike_out[0], "neuron 0 should be refractory");
-        assert_eq!(pool.neuron_activities()[0], 1, "spike_count should stay 1 (no new spike)");
+        assert_eq!(
+            pool.neuron_activities()[0],
+            1,
+            "spike_count should stay 1 (no new spike)"
+        );
 
         // Wait out refractory (2 ticks), then spike again
         pool.tick_simple(&input); // tick 3 — still refractory
         pool.tick_simple(&input); // tick 4 — should spike again
-        assert!(pool.neurons.spike_out[0], "neuron 0 should spike after refractory");
-        assert_eq!(pool.neuron_activities()[0], 2, "spike_count should now be 2");
+        assert!(
+            pool.neurons.spike_out[0],
+            "neuron 0 should spike after refractory"
+        );
+        assert_eq!(
+            pool.neuron_activities()[0],
+            2,
+            "spike_count should now be 2"
+        );
 
         // Reset activities
         pool.reset_activities();
@@ -3838,7 +4236,11 @@ mod tests {
     #[test]
     fn growth_ratio_tracks_initial_size() {
         let pool = NeuronPool::new("test", 100, PoolConfig::default());
-        assert_eq!(pool.growth_ratio(), 1.0, "initial growth ratio should be 1.0");
+        assert_eq!(
+            pool.growth_ratio(),
+            1.0,
+            "initial growth ratio should be 1.0"
+        );
     }
 
     // ====================================================================
@@ -3878,13 +4280,19 @@ mod tests {
         }
 
         // Dale's Law: 80% excitatory of new neurons
-        let new_exc = (32..40).filter(|&i| crate::neuron::flags::is_excitatory(pool.neurons.flags[i])).count();
+        let new_exc = (32..40)
+            .filter(|&i| crate::neuron::flags::is_excitatory(pool.neurons.flags[i]))
+            .count();
         assert_eq!(new_exc, 6, "80% of 8 = 6 excitatory"); // (8*4)/5 = 6
 
         // CSR should be extended — new neurons have 0 outgoing synapses
         assert_eq!(pool.synapses.row_ptr.len(), 41); // n_neurons + 1
         for i in 33..=40 {
-            assert_eq!(pool.synapses.outgoing((i - 1) as u32).len(), 0, "new neuron should have no synapses");
+            assert_eq!(
+                pool.synapses.outgoing((i - 1) as u32).len(),
+                0,
+                "new neuron should have no synapses"
+            );
         }
 
         // Growth ratio should reflect the change
@@ -3905,13 +4313,22 @@ mod tests {
         let mut input2 = vec![0i16; 24];
         input2[20] = 10000;
         pool.tick_simple(&input2);
-        assert!(pool.neurons.spike_out[20], "new neuron should spike with strong input");
+        assert!(
+            pool.neurons.spike_out[20],
+            "new neuron should spike with strong input"
+        );
     }
 
     #[test]
     fn grow_spatial_extends_depth() {
         let dims = SpatialDims::new(4, 4, 4);
-        let mut pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
         assert_eq!(pool.n_neurons, 64);
 
         pool.grow_neurons_seeded(16, 42);
@@ -3926,7 +4343,13 @@ mod tests {
 
     #[test]
     fn prune_neurons_reduces_count() {
-        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 32, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_random_connectivity_seeded(
+            "test",
+            32,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
         let syn_before = pool.synapse_count();
         assert!(syn_before > 0);
 
@@ -3946,7 +4369,8 @@ mod tests {
 
     #[test]
     fn prune_neurons_remaps_synapses() {
-        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 16, 0.1, PoolConfig::default(), 42);
+        let mut pool =
+            NeuronPool::with_random_connectivity_seeded("test", 16, 0.1, PoolConfig::default(), 42);
 
         // Prune the middle neurons
         pool.prune_neurons(&[4, 5, 6, 7]);
@@ -3955,15 +4379,22 @@ mod tests {
         // CSR integrity: all targets should be < n_neurons
         for src in 0..pool.n_neurons {
             for syn in pool.synapses.outgoing(src) {
-                assert!((syn.target as u32) < pool.n_neurons,
-                    "target {} out of range for {} neurons", syn.target, pool.n_neurons);
+                assert!(
+                    (syn.target as u32) < pool.n_neurons,
+                    "target {} out of range for {} neurons",
+                    syn.target,
+                    pool.n_neurons
+                );
             }
         }
 
         // row_ptr should be monotonically non-decreasing
         for i in 0..pool.synapses.row_ptr.len() - 1 {
-            assert!(pool.synapses.row_ptr[i] <= pool.synapses.row_ptr[i + 1],
-                "row_ptr not monotonic at {}", i);
+            assert!(
+                pool.synapses.row_ptr[i] <= pool.synapses.row_ptr[i + 1],
+                "row_ptr not monotonic at {}",
+                i
+            );
         }
     }
 
@@ -4011,7 +4442,13 @@ mod tests {
     #[test]
     fn migration_moves_toward_activity() {
         let dims = SpatialDims::new(4, 4, 4);
-        let mut pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
 
         // Set high activity in one corner (neurons near index 0)
         for i in 0..8 {
@@ -4031,7 +4468,13 @@ mod tests {
     #[test]
     fn migration_preserves_pool_integrity() {
         let dims = SpatialDims::new(4, 4, 4);
-        let mut pool = NeuronPool::with_spatial_connectivity_seeded("test", dims, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_spatial_connectivity_seeded(
+            "test",
+            dims,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
 
         for i in 0..16 {
             pool.spike_counts[i] = 20;
@@ -4047,15 +4490,24 @@ mod tests {
         // CSR integrity
         for src in 0..pool.n_neurons {
             for syn in pool.synapses.outgoing(src) {
-                assert!((syn.target as u32) < pool.n_neurons,
-                    "target {} out of range after migration", syn.target);
+                assert!(
+                    (syn.target as u32) < pool.n_neurons,
+                    "target {} out of range after migration",
+                    syn.target
+                );
             }
         }
     }
 
     #[test]
     fn grow_then_prune_round_trip() {
-        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 32, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_random_connectivity_seeded(
+            "test",
+            32,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
 
         // Grow
         pool.grow_neurons_seeded(8, 42);
@@ -4084,7 +4536,10 @@ mod tests {
 
         let count_0 = pool.neuron_activities()[0];
         let count_5 = pool.neuron_activities()[5];
-        assert!(count_0 > 0 || count_5 > 0, "at least one neuron should have spiked");
+        assert!(
+            count_0 > 0 || count_5 > 0,
+            "at least one neuron should have spiked"
+        );
 
         let path = std::env::temp_dir().join("neuropool_test_v3_activity.pool");
         pool.save(&path).expect("save failed");
@@ -4104,7 +4559,7 @@ mod tests {
 
     #[test]
     fn per_type_refractory_periods() {
-        use crate::neuron::{NeuronProfile, flags};
+        use crate::neuron::{flags, NeuronProfile};
 
         // Use refractory_ticks = 0 to enable per-profile defaults
         let mut config = PoolConfig::default();
@@ -4127,27 +4582,54 @@ mod tests {
         assert!(pool.neurons.spike_out[1], "n1 should spike");
 
         // Check refractory periods set correctly
-        assert_eq!(pool.neurons.refract_remaining[0], 1, "FastSpiking should have refract=1");
-        assert_eq!(pool.neurons.refract_remaining[1], 3, "IntrinsicBursting should have refract=3");
-        assert_eq!(pool.neurons.refract_remaining[2], 2, "RegularSpiking should have refract=2");
+        assert_eq!(
+            pool.neurons.refract_remaining[0], 1,
+            "FastSpiking should have refract=1"
+        );
+        assert_eq!(
+            pool.neurons.refract_remaining[1], 3,
+            "IntrinsicBursting should have refract=3"
+        );
+        assert_eq!(
+            pool.neurons.refract_remaining[2], 2,
+            "RegularSpiking should have refract=2"
+        );
 
         // Tick 2: n0 refractory (refract=1 → decrements to 0, skips), n1 refractory (refract=3 → 2)
         pool.tick_simple(&strong_input);
-        assert!(!pool.neurons.spike_out[0], "FastSpiking still in 1-tick refractory");
-        assert!(!pool.neurons.spike_out[1], "IntrinsicBursting still refractory");
+        assert!(
+            !pool.neurons.spike_out[0],
+            "FastSpiking still in 1-tick refractory"
+        );
+        assert!(
+            !pool.neurons.spike_out[1],
+            "IntrinsicBursting still refractory"
+        );
 
         // Tick 3: n0 recovers (refract now 0), n1 still (refract=2 → 1)
         pool.tick_simple(&strong_input);
-        assert!(pool.neurons.spike_out[0], "FastSpiking should fire after 1 dead tick");
-        assert!(!pool.neurons.spike_out[1], "IntrinsicBursting still refractory");
+        assert!(
+            pool.neurons.spike_out[0],
+            "FastSpiking should fire after 1 dead tick"
+        );
+        assert!(
+            !pool.neurons.spike_out[1],
+            "IntrinsicBursting still refractory"
+        );
 
         // Tick 4: n1 still refractory (refract=1 → 0)
         pool.tick_simple(&strong_input);
-        assert!(!pool.neurons.spike_out[1], "IntrinsicBursting still refractory");
+        assert!(
+            !pool.neurons.spike_out[1],
+            "IntrinsicBursting still refractory"
+        );
 
         // Tick 5: n1 recovers (refract now 0)
         pool.tick_simple(&strong_input);
-        assert!(pool.neurons.spike_out[1], "IntrinsicBursting should fire after 3 dead ticks");
+        assert!(
+            pool.neurons.spike_out[1],
+            "IntrinsicBursting should fire after 3 dead ticks"
+        );
     }
 
     // ====================================================================
@@ -4156,7 +4638,7 @@ mod tests {
 
     #[test]
     fn threshold_adaptation_intrinsic_bursting_stable() {
-        use crate::neuron::{NeuronProfile, flags};
+        use crate::neuron::{flags, NeuronProfile};
 
         let mut config = PoolConfig::default();
         config.homeostatic_rate = 1;
@@ -4189,8 +4671,8 @@ mod tests {
         // High coherence + high DA + healthy activity/density = high fitness
         let good = FitnessInput {
             coherence: 200,
-            da: 200,          // 72 above baseline
-            cortisol: 20,     // below baseline — no penalty
+            da: 200,      // 72 above baseline
+            cortisol: 20, // below baseline — no penalty
             active_ratio: 0.20,
             synapse_density: 0.50,
         };
@@ -4199,9 +4681,9 @@ mod tests {
         // Low coherence + low DA + high cortisol = low fitness
         let bad = FitnessInput {
             coherence: 30,
-            da: 80,           // below baseline — no reward
-            cortisol: 200,    // high stress
-            active_ratio: 0.01,  // nearly silent
+            da: 80,                // below baseline — no reward
+            cortisol: 200,         // high stress
+            active_ratio: 0.01,    // nearly silent
             synapse_density: 0.05, // almost no synapses
         };
         let bad_score = pool.compute_fitness(&bad);
@@ -4209,9 +4691,14 @@ mod tests {
         assert!(
             good_score > bad_score + 50,
             "healthy region ({}) should score much higher than struggling ({})",
-            good_score, bad_score
+            good_score,
+            bad_score
         );
-        assert!(good_score >= 140, "healthy region should score well: {}", good_score);
+        assert!(
+            good_score >= 140,
+            "healthy region should score well: {}",
+            good_score
+        );
     }
 
     #[test]
@@ -4234,7 +4721,10 @@ mod tests {
 
         let result = pool.evolve_structure(&struggling, 12345);
         assert_eq!(result.generation, 1, "generation should increment");
-        assert!(result.mutations_applied > 0, "struggling pool should receive mutations");
+        assert!(
+            result.mutations_applied > 0,
+            "struggling pool should receive mutations"
+        );
         assert!(!pool.journal.is_empty(), "journal should have entries");
 
         // Elite pool: high fitness → much lower mutation rate
@@ -4242,7 +4732,8 @@ mod tests {
         elite_config.evolution.elite_threshold = 50; // very low bar so pool qualifies
         elite_config.evolution.elite_mutation_prob = 0; // never mutate elites
 
-        let mut elite_pool = NeuronPool::with_random_connectivity_seeded("elite", 64, 0.05, elite_config, 42);
+        let mut elite_pool =
+            NeuronPool::with_random_connectivity_seeded("elite", 64, 0.05, elite_config, 42);
         let elite_fitness = FitnessInput {
             coherence: 250,
             da: 230,
@@ -4252,7 +4743,10 @@ mod tests {
         };
 
         let elite_result = elite_pool.evolve_structure(&elite_fitness, 99999);
-        assert_eq!(elite_result.mutations_applied, 0, "elite pool should skip mutations");
+        assert_eq!(
+            elite_result.mutations_applied, 0,
+            "elite pool should skip mutations"
+        );
         assert_eq!(elite_result.generation, 1, "generation still increments");
     }
 
@@ -4278,13 +4772,25 @@ mod tests {
         }
 
         assert_eq!(pool.generation, 5, "generation should be 5 after 5 calls");
-        assert!(pool.journal.len() > 0, "journal should have entries after evolution");
-        assert!(pool.journal.len() <= 16, "journal should not exceed max 16 entries");
+        assert!(
+            pool.journal.len() > 0,
+            "journal should have entries after evolution"
+        );
+        assert!(
+            pool.journal.len() <= 16,
+            "journal should not exceed max 16 entries"
+        );
     }
 
     #[test]
     fn rollback_restores_structure() {
-        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 64, 0.05, PoolConfig::default(), 42);
+        let mut pool = NeuronPool::with_random_connectivity_seeded(
+            "test",
+            64,
+            0.05,
+            PoolConfig::default(),
+            42,
+        );
 
         // Capture original state
         let orig_n = pool.n_neurons;
@@ -4309,13 +4815,23 @@ mod tests {
         assert_eq!(pool.n_neurons, orig_n, "n_neurons restored");
         assert_eq!(pool.n_excitatory, orig_n_exc, "n_excitatory restored");
         assert_eq!(pool.neurons.flags[0], orig_flags_0, "flags restored");
-        assert_eq!(pool.neurons.threshold[0], orig_threshold_0, "threshold restored");
+        assert_eq!(
+            pool.neurons.threshold[0], orig_threshold_0,
+            "threshold restored"
+        );
 
         // Synapse count should match
-        assert_eq!(pool.synapses.synapses.len(), orig_synapse_count, "synapse count restored");
+        assert_eq!(
+            pool.synapses.synapses.len(),
+            orig_synapse_count,
+            "synapse count restored"
+        );
 
         // Dynamic state should be reset to resting
-        assert_eq!(pool.neurons.membrane[0], pool.config.resting_potential, "membrane reset to resting");
+        assert_eq!(
+            pool.neurons.membrane[0], pool.config.resting_potential,
+            "membrane reset to resting"
+        );
         assert_eq!(pool.neurons.trace[0], 0, "trace reset");
     }
 }

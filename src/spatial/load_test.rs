@@ -23,13 +23,15 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::spatial::{
-        Axon, CorrelationTracker, HubTracker, MigrationConfig, migrate_step,
-        SpatialCascade, SpatialCascadeConfig, SpatialNeuron, SpatialSynapse,
-        SpatialSynapseStore, TissueConfig, TissueField, detect_regions, RegionConfig,
-        SpatialRuntime, SpatialRuntimeConfig, WiringConfig, wire_by_proximity,
+    use crate::spatial::snapshot::{
+        snapshot_output_dir, SnapshotMetrics, SnapshotRequest, SnapshotWriter,
     };
-    use crate::spatial::snapshot::{SnapshotWriter, SnapshotRequest, SnapshotMetrics, snapshot_output_dir};
+    use crate::spatial::{
+        detect_regions, migrate_step, wire_by_proximity, Axon, CorrelationTracker, HubTracker,
+        MigrationConfig, RegionConfig, SpatialCascade, SpatialCascadeConfig, SpatialNeuron,
+        SpatialRuntime, SpatialRuntimeConfig, SpatialSynapse, SpatialSynapseStore, TissueConfig,
+        TissueField, WiringConfig,
+    };
     use std::time::Instant;
 
     // ========================================================================
@@ -147,7 +149,14 @@ mod tests {
         time_us: u64,
     ) {
         let neighbor_threshold = if use_neighborhood { 0.3 } else { f32::MAX };
-        cascade.inject_sensory_scaled(coefficients, 2000.0, 1500.0, neighbor_threshold, 0.1, time_us);
+        cascade.inject_sensory_scaled(
+            coefficients,
+            2000.0,
+            1500.0,
+            neighbor_threshold,
+            0.1,
+            time_us,
+        );
     }
 
     /// Generate a synthetic MFCC frame (simulates audio feature extraction).
@@ -185,19 +194,37 @@ mod tests {
             let fired = n.last_spike_us > 0;
             if n.nuclei.is_sensory() {
                 sensory_total += 1;
-                if fired { sensory_fired += 1; }
+                if fired {
+                    sensory_fired += 1;
+                }
             } else if n.nuclei.is_motor() {
                 motor_total += 1;
-                if fired { motor_fired += 1; }
+                if fired {
+                    motor_fired += 1;
+                }
             } else {
                 inter_total += 1;
-                if fired { inter_fired += 1; }
+                if fired {
+                    inter_fired += 1;
+                }
             }
         }
 
-        let s = if sensory_total > 0 { sensory_fired as f32 / sensory_total as f32 } else { 0.0 };
-        let i = if inter_total > 0 { inter_fired as f32 / inter_total as f32 } else { 0.0 };
-        let m = if motor_total > 0 { motor_fired as f32 / motor_total as f32 } else { 0.0 };
+        let s = if sensory_total > 0 {
+            sensory_fired as f32 / sensory_total as f32
+        } else {
+            0.0
+        };
+        let i = if inter_total > 0 {
+            inter_fired as f32 / inter_total as f32
+        } else {
+            0.0
+        };
+        let m = if motor_total > 0 {
+            motor_fired as f32 / motor_total as f32
+        } else {
+            0.0
+        };
         (s, i, m)
     }
 
@@ -277,7 +304,7 @@ mod tests {
         // We can't easily change the scaling factor, but we can use very low magnitude
         // Magnitude 12 with 8x = 96 current (way below 1500 threshold)
         let config = HushConfig {
-            synapse_magnitude: 12, // 12 * 8 = 96, way below threshold
+            synapse_magnitude: 12,  // 12 * 8 = 96, way below threshold
             use_neighborhood: true, // Keep neighborhood on
             ..Default::default()
         };
@@ -371,12 +398,16 @@ mod tests {
 
         // With everything working, interneurons should be selectively active
         // 30%+ indicates they're participating, not just noise
-        assert!(inter_util > 0.3,
+        assert!(
+            inter_util > 0.3,
             "Interneurons should be >30% utilized with all mechanisms, got {:.1}%",
-            inter_util * 100.0);
-        assert!(motor_util > 0.3,
+            inter_util * 100.0
+        );
+        assert!(
+            motor_util > 0.3,
             "Motor neurons should be >30% utilized with all mechanisms, got {:.1}%",
-            motor_util * 100.0);
+            motor_util * 100.0
+        );
 
         println!("\n  BASELINE CONFIRMED: System works with all mechanisms");
     }
@@ -410,9 +441,8 @@ mod tests {
         }
 
         // Snapshot initial positions for migration displacement measurement
-        let initial_positions: Vec<[f32; 3]> = cascade.neurons.iter()
-            .map(|n| n.soma.position)
-            .collect();
+        let initial_positions: Vec<[f32; 3]> =
+            cascade.neurons.iter().map(|n| n.soma.position).collect();
 
         let migration_config = MigrationConfig {
             migration_rate: 0.05,
@@ -457,7 +487,9 @@ mod tests {
             // Run every 100 frames (~1 second of simulated time)
             if frame % 100 == 99 {
                 // Tissue plasticity: active neurons soften local tissue
-                let active_mask: Vec<bool> = cascade.neurons.iter()
+                let active_mask: Vec<bool> = cascade
+                    .neurons
+                    .iter()
                     .map(|n| n.last_spike_us > time.saturating_sub(1_000_000))
                     .collect();
                 tissue.update_plasticity(&active_mask);
@@ -494,11 +526,19 @@ mod tests {
         // Sample cross-region correlations
         let mut cross_region_corrs: Vec<(u32, u32, f32)> = Vec::new();
         for i in 0..regions.len() {
-            for j in (i+1)..regions.len() {
-                let sample_a: Vec<usize> = regions[i].neurons.iter()
-                    .take(20).map(|&n| n as usize).collect();
-                let sample_b: Vec<usize> = regions[j].neurons.iter()
-                    .take(20).map(|&n| n as usize).collect();
+            for j in (i + 1)..regions.len() {
+                let sample_a: Vec<usize> = regions[i]
+                    .neurons
+                    .iter()
+                    .take(20)
+                    .map(|&n| n as usize)
+                    .collect();
+                let sample_b: Vec<usize> = regions[j]
+                    .neurons
+                    .iter()
+                    .take(20)
+                    .map(|&n| n as usize)
+                    .collect();
                 let corr = mean_correlation(&correlations, &sample_a, &sample_b, time);
                 cross_region_corrs.push((regions[i].id, regions[j].id, corr));
             }
@@ -548,7 +588,10 @@ mod tests {
         println!("    Run:            {:>8.2} ms", run_time);
         println!("    Total:          {:>8.2} ms", total_time);
         println!("    Simulated:      {:>8.2} s", simulated_duration_s);
-        println!("    Real-time ratio:{:>8.1}x", simulated_duration_s * 1000.0 / run_time);
+        println!(
+            "    Real-time ratio:{:>8.1}x",
+            simulated_duration_s * 1000.0 / run_time
+        );
 
         println!("\n  NETWORK");
         println!("  -------");
@@ -575,11 +618,17 @@ mod tests {
         println!("  -----------------");
         println!("    Detected:       {:>8}", regions.len());
         for region in &regions {
-            println!("    Region {}: {} neurons at ({:.1}, {:.1}, {:.1}) [sensory={}, motor={}, osc={}]",
-                region.id, region.neurons.len(),
-                region.centroid[0], region.centroid[1], region.centroid[2],
-                region.signature.has_sensory, region.signature.has_motor,
-                region.signature.has_oscillators);
+            println!(
+                "    Region {}: {} neurons at ({:.1}, {:.1}, {:.1}) [sensory={}, motor={}, osc={}]",
+                region.id,
+                region.neurons.len(),
+                region.centroid[0],
+                region.centroid[1],
+                region.centroid[2],
+                region.signature.has_sensory,
+                region.signature.has_motor,
+                region.signature.has_oscillators
+            );
         }
 
         println!("\n  CROSS-REGION CORRELATIONS");
@@ -608,13 +657,21 @@ mod tests {
         let neurons_migrated = mean_displacement > 0.001;
 
         if realtime_capable && good_utilization && structure_emerged {
-            println!("    REAL-TIME CAPABLE: {}x faster than real-time",
-                (simulated_duration_s * 1000.0 / run_time) as i32);
-            println!("    GOOD UTILIZATION: Interneurons {:.0}%, Motor {:.0}%",
-                inter_util * 100.0, motor_util * 100.0);
+            println!(
+                "    REAL-TIME CAPABLE: {}x faster than real-time",
+                (simulated_duration_s * 1000.0 / run_time) as i32
+            );
+            println!(
+                "    GOOD UTILIZATION: Interneurons {:.0}%, Motor {:.0}%",
+                inter_util * 100.0,
+                motor_util * 100.0
+            );
             println!("    STRUCTURE EMERGED: {} regions detected", regions.len());
             if neurons_migrated {
-                println!("    NEURONS ADAPTED: mean {:.3} units migration", mean_displacement);
+                println!(
+                    "    NEURONS ADAPTED: mean {:.3} units migration",
+                    mean_displacement
+                );
             }
             println!("\n    ==> WORTH SCALING UP");
         } else {
@@ -637,9 +694,11 @@ mod tests {
 
         // Assertions for CI
         assert!(realtime_capable, "Must be real-time capable");
-        assert!(inter_util > 0.3,
+        assert!(
+            inter_util > 0.3,
             "Interneurons must have >30% utilization, got {:.1}%",
-            inter_util * 100.0);
+            inter_util * 100.0
+        );
     }
 
     /// Calculate mean correlation between two groups.
@@ -686,20 +745,27 @@ mod tests {
         for n in neurons {
             let cx = (n.soma.position[0] * 2.0).round() as usize;
             let cy = (n.soma.position[1] * 2.0).round() as usize;
-            if cx >= w || cy >= h { continue; }
+            if cx >= w || cy >= h {
+                continue;
+            }
             let fired = n.last_spike_us > 0;
             let (ch, pri) = match (n.nuclei.is_sensory(), n.nuclei.is_motor(), fired) {
-                (true, _, true)  => ('S', 2),
+                (true, _, true) => ('S', 2),
                 (true, _, false) => ('s', 1),
-                (_, true, true)  => ('M', 2),
+                (_, true, true) => ('M', 2),
                 (_, true, false) => ('m', 1),
-                (_, _, true)     => ('#', 2),
-                (_, _, false)    => ('.', 1),
+                (_, _, true) => ('#', 2),
+                (_, _, false) => ('.', 1),
             };
-            if pri > grid[cy][cx].1 { grid[cy][cx] = (ch, pri); }
+            if pri > grid[cy][cx].1 {
+                grid[cy][cx] = (ch, pri);
+            }
         }
 
-        println!("\n    {} [S=sensory ./#=inter m/M=motor  CAPS=fired]", label);
+        println!(
+            "\n    {} [S=sensory ./#=inter m/M=motor  CAPS=fired]",
+            label
+        );
         for y in (0..h).rev() {
             let row: String = grid[y].iter().map(|&(c, _)| c).collect();
             if y % 2 == 0 {
@@ -736,7 +802,9 @@ mod tests {
                 file.read_exact(&mut magic)?;
                 if &magic != b"SP01" {
                     return Err(std::io::Error::new(
-                        std::io::ErrorKind::InvalidData, "not a spool file"));
+                        std::io::ErrorKind::InvalidData,
+                        "not a spool file",
+                    ));
                 }
 
                 let mut ver = [0u8; 1];
@@ -764,7 +832,9 @@ mod tests {
                 Ok(Self { file, entries })
             }
 
-            pub fn card_count(&self) -> usize { self.entries.len() }
+            pub fn card_count(&self) -> usize {
+                self.entries.len()
+            }
 
             pub fn read_card(&mut self, index: usize) -> std::io::Result<Vec<u8>> {
                 let (offset, length) = self.entries[index];
@@ -787,13 +857,17 @@ mod tests {
             const N_MFCC: usize = 26;
 
             pub fn from_card(data: Vec<u8>) -> Option<Self> {
-                if data.len() < 6 { return None; }
+                if data.len() < 6 {
+                    return None;
+                }
                 let n_frames = u32::from_le_bytes(data[0..4].try_into().ok()?) as usize;
                 let mfcc_end = 4 + n_frames * Self::N_MFCC;
-                if data.len() < mfcc_end + 2 { return None; }
+                if data.len() < mfcc_end + 2 {
+                    return None;
+                }
 
-                let tlen = u16::from_le_bytes(
-                    data[mfcc_end..mfcc_end + 2].try_into().ok()?) as usize;
+                let tlen =
+                    u16::from_le_bytes(data[mfcc_end..mfcc_end + 2].try_into().ok()?) as usize;
                 let tstart = mfcc_end + 2;
                 let transcript = if tstart + tlen <= data.len() {
                     String::from_utf8_lossy(&data[tstart..tstart + tlen]).to_string()
@@ -801,7 +875,11 @@ mod tests {
                     String::new()
                 };
 
-                Some(Self { n_frames, transcript, card_data: data })
+                Some(Self {
+                    n_frames,
+                    transcript,
+                    card_data: data,
+                })
             }
 
             /// Get frame as f32 slice normalized to [-1.0, 1.0].
@@ -819,10 +897,16 @@ mod tests {
         use spool_reader::{MiniSpoolReader, SpoolSample};
 
         let spool_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..").join("hush").join("data").join("dev-clean.spool");
+            .join("..")
+            .join("hush")
+            .join("data")
+            .join("dev-clean.spool");
 
         if !spool_path.exists() {
-            println!("SKIPPED: dev-clean.spool not found at {}", spool_path.display());
+            println!(
+                "SKIPPED: dev-clean.spool not found at {}",
+                spool_path.display()
+            );
             println!("  (Run hush-prepare on LibriSpeech dev-clean to generate it)");
             return;
         }
@@ -833,8 +917,7 @@ mod tests {
 
         // Open spool
         let spool_start = Instant::now();
-        let mut spool = MiniSpoolReader::open(&spool_path)
-            .expect("failed to open spool");
+        let mut spool = MiniSpoolReader::open(&spool_path).expect("failed to open spool");
         let total_utterances = spool.card_count();
         let spool_open_ms = spool_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -866,8 +949,13 @@ mod tests {
         let mut runtime = SpatialRuntime::new(neurons, synapses, runtime_config);
 
         // Snapshot initial mean magnitude for comparison
-        let initial_mean_mag: f32 = runtime.cascade.synapses.iter()
-            .map(|s| s.signal.magnitude as f32).sum::<f32>() / synapse_count as f32;
+        let initial_mean_mag: f32 = runtime
+            .cascade
+            .synapses
+            .iter()
+            .map(|s| s.signal.magnitude as f32)
+            .sum::<f32>()
+            / synapse_count as f32;
 
         // === PNG SNAPSHOT WRITER (10 snapshots: before + 8 during + after) ===
         let snapshot_writer = SnapshotWriter::spawn(snapshot_output_dir());
@@ -879,7 +967,10 @@ mod tests {
             .collect();
 
         // === ASCII + PNG SNAPSHOT: BEFORE ===
-        render_ascii_field(&runtime.cascade.neurons, "BEFORE — Initial Positions (all silent)");
+        render_ascii_field(
+            &runtime.cascade.neurons,
+            "BEFORE — Initial Positions (all silent)",
+        );
         snapshot_writer.queue(SnapshotRequest {
             label: "BEFORE".into(),
             seq: snapshot_seq,
@@ -915,7 +1006,10 @@ mod tests {
             let card = spool.read_card(utt_idx).expect("failed to read card");
             let sample = match SpoolSample::from_card(card) {
                 Some(s) => s,
-                None => { println!("    Skipping malformed card {}", utt_idx); continue; }
+                None => {
+                    println!("    Skipping malformed card {}", utt_idx);
+                    continue;
+                }
             };
 
             let utt_duration_s = sample.n_frames as f64 * 0.01; // 10ms per frame
@@ -923,13 +1017,17 @@ mod tests {
 
             // Print first 3, then every 100th, to keep output manageable
             if utt_idx < 3 || utt_idx % 100 == 0 {
-                println!("    Utterance {:>4}: {:>5} frames ({:.1}s) \"{}\"",
-                    utt_idx, sample.n_frames, utt_duration_s,
+                println!(
+                    "    Utterance {:>4}: {:>5} frames ({:.1}s) \"{}\"",
+                    utt_idx,
+                    sample.n_frames,
+                    utt_duration_s,
                     if sample.transcript.len() > 60 {
                         format!("{}...", &sample.transcript[..57])
                     } else {
                         sample.transcript.clone()
-                    });
+                    }
+                );
             } else if utt_idx == 3 {
                 println!("    ... (printing every 100th utterance)");
             }
@@ -1000,8 +1098,10 @@ mod tests {
         let total_hard_pruned = runtime.structural.hard_pruned;
 
         // === ASCII SNAPSHOT: AFTER ===
-        let after_label = format!("AFTER — {} utterances, {} learning cycles",
-            n_utterances, learning_cycles);
+        let after_label = format!(
+            "AFTER — {} utterances, {} learning cycles",
+            n_utterances, learning_cycles
+        );
         render_ascii_field(&cascade.neurons, &after_label);
 
         // Metrics
@@ -1010,14 +1110,28 @@ mod tests {
 
         // Regions
         let regions = detect_regions(
-            &cascade.neurons, Some(correlations), time, &RegionConfig::default());
+            &cascade.neurons,
+            Some(correlations),
+            time,
+            &RegionConfig::default(),
+        );
 
         // Cross-region correlations
         let mut cross_region_corrs: Vec<(u32, u32, f32)> = Vec::new();
         for i in 0..regions.len() {
-            for j in (i+1)..regions.len() {
-                let sa: Vec<usize> = regions[i].neurons.iter().take(20).map(|&n| n as usize).collect();
-                let sb: Vec<usize> = regions[j].neurons.iter().take(20).map(|&n| n as usize).collect();
+            for j in (i + 1)..regions.len() {
+                let sa: Vec<usize> = regions[i]
+                    .neurons
+                    .iter()
+                    .take(20)
+                    .map(|&n| n as usize)
+                    .collect();
+                let sb: Vec<usize> = regions[j]
+                    .neurons
+                    .iter()
+                    .take(20)
+                    .map(|&n| n as usize)
+                    .collect();
                 let corr = mean_correlation(correlations, &sa, &sb, time);
                 cross_region_corrs.push((regions[i].id, regions[j].id, corr));
             }
@@ -1032,7 +1146,9 @@ mod tests {
             let dz = neuron.soma.position[2] - initial_positions[i][2];
             let dist = (dx * dx + dy * dy + dz * dz).sqrt();
             total_displacement += dist;
-            if dist > max_displacement { max_displacement = dist; }
+            if dist > max_displacement {
+                max_displacement = dist;
+            }
         }
         let mean_displacement = total_displacement / neuron_count as f32;
 
@@ -1072,10 +1188,15 @@ mod tests {
         println!("    Setup:           {:>8.2} ms", setup_ms);
         println!("    Run:             {:>8.2} ms", run_ms);
         println!("    Total:           {:>8.2} ms", total_ms);
-        println!("    Audio processed: {:>8.1} s  ({} frames from {} utterances)",
-            total_audio_seconds, total_frames, n_utterances);
+        println!(
+            "    Audio processed: {:>8.1} s  ({} frames from {} utterances)",
+            total_audio_seconds, total_frames, n_utterances
+        );
         println!("    Simulated:       {:>8.2} s", simulated_s);
-        println!("    Real-time ratio: {:>8.1}x", simulated_s * 1000.0 / run_ms);
+        println!(
+            "    Real-time ratio: {:>8.1}x",
+            simulated_s * 1000.0 / run_ms
+        );
 
         println!("\n  NETWORK");
         println!("  -------");
@@ -1087,8 +1208,14 @@ mod tests {
         println!("  --------");
         println!("    Total spikes:    {:>8}", cascade.total_spikes());
         println!("    Total events:    {:>8}", cascade.total_events());
-        println!("    Spikes/sec:      {:>8.0}", cascade.total_spikes() as f64 / simulated_s);
-        println!("    Events/sec:      {:>8.0}", cascade.total_events() as f64 / simulated_s);
+        println!(
+            "    Spikes/sec:      {:>8.0}",
+            cascade.total_spikes() as f64 / simulated_s
+        );
+        println!(
+            "    Events/sec:      {:>8.0}",
+            cascade.total_events() as f64 / simulated_s
+        );
         println!("    Coincidence:     {:>8}", cascade.coincidence_events);
         println!("    Tissue atten:    {:>8}", cascade.tissue_attenuated);
 
@@ -1102,11 +1229,17 @@ mod tests {
         println!("  -----------------");
         println!("    Detected:        {:>8}", regions.len());
         for region in &regions {
-            println!("    Region {}: {} neurons at ({:.1}, {:.1}, {:.1}) [sensory={}, motor={}, osc={}]",
-                region.id, region.neurons.len(),
-                region.centroid[0], region.centroid[1], region.centroid[2],
-                region.signature.has_sensory, region.signature.has_motor,
-                region.signature.has_oscillators);
+            println!(
+                "    Region {}: {} neurons at ({:.1}, {:.1}, {:.1}) [sensory={}, motor={}, osc={}]",
+                region.id,
+                region.neurons.len(),
+                region.centroid[0],
+                region.centroid[1],
+                region.centroid[2],
+                region.signature.has_sensory,
+                region.signature.has_motor,
+                region.signature.has_oscillators
+            );
         }
 
         println!("\n  CROSS-REGION CORRELATIONS");
@@ -1134,10 +1267,20 @@ mod tests {
             let mean_c: f32 = cond.iter().sum::<f32>() / cond.len() as f32;
             let min_c = cond.iter().copied().fold(f32::MAX, f32::min);
             let max_c = cond.iter().copied().fold(f32::MIN, f32::max);
-            println!("    Resistance:    mean={:.3}  min={:.3}  max={:.3}  (baseline={})",
-                mean_r, min_r, max_r, tissue.config().baseline_resistance);
-            println!("    Conductivity:  mean={:.3}  min={:.3}  max={:.3}  (baseline={})",
-                mean_c, min_c, max_c, tissue.config().baseline_conductivity);
+            println!(
+                "    Resistance:    mean={:.3}  min={:.3}  max={:.3}  (baseline={})",
+                mean_r,
+                min_r,
+                max_r,
+                tissue.config().baseline_resistance
+            );
+            println!(
+                "    Conductivity:  mean={:.3}  min={:.3}  max={:.3}  (baseline={})",
+                mean_c,
+                min_c,
+                max_c,
+                tissue.config().baseline_conductivity
+            );
 
             // Per-role tissue stats
             let sensory_end = config.mfcc_bins;
@@ -1146,9 +1289,16 @@ mod tests {
             let (mut ir, mut ic) = (0.0f32, 0.0f32);
             let (mut mr, mut mc) = (0.0f32, 0.0f32);
             for i in 0..res.len() {
-                if i < sensory_end { sr += res[i]; sc += cond[i]; }
-                else if i < inter_end { ir += res[i]; ic += cond[i]; }
-                else { mr += res[i]; mc += cond[i]; }
+                if i < sensory_end {
+                    sr += res[i];
+                    sc += cond[i];
+                } else if i < inter_end {
+                    ir += res[i];
+                    ic += cond[i];
+                } else {
+                    mr += res[i];
+                    mc += cond[i];
+                }
             }
             let sn = config.mfcc_bins as f32;
             let inn = config.interneuron_count as f32;
@@ -1162,9 +1312,15 @@ mod tests {
         println!("\n  STRUCTURAL PRUNING");
         println!("  -------------------");
         println!("    Pruning cycles:  {:>8}", total_pruning_cycles);
-        println!("    Hard pruned:     {:>8} (removed from store)", total_hard_pruned);
+        println!(
+            "    Hard pruned:     {:>8} (removed from store)",
+            total_hard_pruned
+        );
         println!("    Active synapses: {:>8}", cascade.synapses.len());
-        println!("    Dormant synapses:{:>8}", cascade.synapses.count_dormant());
+        println!(
+            "    Dormant synapses:{:>8}",
+            cascade.synapses.count_dormant()
+        );
         println!("    Started with:    {:>8} synapses", synapse_count);
 
         // Motor neuron outlier diagnostic — find motors that migrated far from their origin
@@ -1182,12 +1338,21 @@ mod tests {
             let dy = n.soma.position[1] - initial_positions[i][1];
             let dz = n.soma.position[2] - initial_positions[i][2];
             let dist = (dx * dx + dy * dy + dz * dz).sqrt();
-            motor_stats.push((i, dist, initial_positions[i], n.soma.position, n.last_spike_us, n.membrane));
+            motor_stats.push((
+                i,
+                dist,
+                initial_positions[i],
+                n.soma.position,
+                n.last_spike_us,
+                n.membrane,
+            ));
         }
         motor_stats.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
         // Print top 5 most displaced motors
-        for (rank, &(idx, dist, orig, pos, last_spike, membrane)) in motor_stats.iter().take(5).enumerate() {
+        for (rank, &(idx, dist, orig, pos, last_spike, membrane)) in
+            motor_stats.iter().take(5).enumerate()
+        {
             let fired = last_spike > 0;
             // Count incoming synapses and their magnitudes
             let mut in_count = 0u32;
@@ -1198,7 +1363,9 @@ mod tests {
                 if syn.target == idx as u32 {
                     in_count += 1;
                     in_mag_sum += syn.signal.magnitude as u32;
-                    if syn.signal.magnitude == 255 { in_at_cap += 1; }
+                    if syn.signal.magnitude == 255 {
+                        in_at_cap += 1;
+                    }
                     let src = syn.source as usize;
                     if src < sensory_end {
                         presynaptic_roles[0] += 1;
@@ -1209,7 +1376,11 @@ mod tests {
                     }
                 }
             }
-            let in_mean_mag = if in_count > 0 { in_mag_sum as f32 / in_count as f32 } else { 0.0 };
+            let in_mean_mag = if in_count > 0 {
+                in_mag_sum as f32 / in_count as f32
+            } else {
+                0.0
+            };
 
             // Correlation with top partners
             let top_corr_partners = correlations.correlated_partners(idx, 0.1, time);
@@ -1219,33 +1390,58 @@ mod tests {
                 sorted.into_iter().take(3).collect()
             };
 
-            println!("    #{} Motor[{}]: displacement={:.2} units  {}",
-                rank + 1, idx, dist, if fired { "FIRED" } else { "silent" });
-            println!("        Origin: ({:.1}, {:.1}, {:.1}) → Now: ({:.1}, {:.1}, {:.1})",
-                orig[0], orig[1], orig[2], pos[0], pos[1], pos[2]);
-            println!("        Membrane: {}  Last spike: {}us",
-                membrane, last_spike);
-            println!("        Incoming: {} synapses (mean mag {:.1}, {} at cap)",
-                in_count, in_mean_mag, in_at_cap);
-            println!("        Presynaptic: {} sensory, {} inter, {} motor",
-                presynaptic_roles[0], presynaptic_roles[1], presynaptic_roles[2]);
+            println!(
+                "    #{} Motor[{}]: displacement={:.2} units  {}",
+                rank + 1,
+                idx,
+                dist,
+                if fired { "FIRED" } else { "silent" }
+            );
+            println!(
+                "        Origin: ({:.1}, {:.1}, {:.1}) → Now: ({:.1}, {:.1}, {:.1})",
+                orig[0], orig[1], orig[2], pos[0], pos[1], pos[2]
+            );
+            println!(
+                "        Membrane: {}  Last spike: {}us",
+                membrane, last_spike
+            );
+            println!(
+                "        Incoming: {} synapses (mean mag {:.1}, {} at cap)",
+                in_count, in_mean_mag, in_at_cap
+            );
+            println!(
+                "        Presynaptic: {} sensory, {} inter, {} motor",
+                presynaptic_roles[0], presynaptic_roles[1], presynaptic_roles[2]
+            );
             if !top3.is_empty() {
-                let partner_strs: Vec<String> = top3.iter().map(|(pid, c)| {
-                    let role = if *pid < sensory_end { "S" }
-                        else if *pid < inter_end { "I" }
-                        else { "M" };
-                    format!("{}[{}]={:.3}", role, pid, c)
-                }).collect();
+                let partner_strs: Vec<String> = top3
+                    .iter()
+                    .map(|(pid, c)| {
+                        let role = if *pid < sensory_end {
+                            "S"
+                        } else if *pid < inter_end {
+                            "I"
+                        } else {
+                            "M"
+                        };
+                        format!("{}[{}]={:.3}", role, pid, c)
+                    })
+                    .collect();
                 println!("        Top correlated: {}", partner_strs.join(", "));
             }
         }
 
         // Mastery learning metrics
-        let final_mean_mag: f32 = cascade.synapses.iter()
-            .map(|s| s.signal.magnitude as f32).sum::<f32>() / synapse_count as f32;
+        let final_mean_mag: f32 = cascade
+            .synapses
+            .iter()
+            .map(|s| s.signal.magnitude as f32)
+            .sum::<f32>()
+            / synapse_count as f32;
         let active_synapses = cascade.synapses.count_active();
         let dormant_synapses = cascade.synapses.count_dormant();
-        let total_changes = total_strengthened + total_weakened + total_dormant + total_awakened + total_flipped;
+        let total_changes =
+            total_strengthened + total_weakened + total_dormant + total_awakened + total_flipped;
 
         println!("\n  MASTERY LEARNING (Hebbian Co-Firing)");
         println!("  -------------------------------------");
@@ -1256,9 +1452,16 @@ mod tests {
         println!("    Gone dormant:    {:>8}", total_dormant);
         println!("    Awakened:        {:>8}", total_awakened);
         println!("    Flipped:         {:>8}", total_flipped);
-        println!("    Mean magnitude:  {:>8.1} → {:.1} ({:+.1})",
-            initial_mean_mag, final_mean_mag, final_mean_mag - initial_mean_mag);
-        println!("    Active synapses: {:>8}/{}", active_synapses, synapse_count);
+        println!(
+            "    Mean magnitude:  {:>8.1} → {:.1} ({:+.1})",
+            initial_mean_mag,
+            final_mean_mag,
+            final_mean_mag - initial_mean_mag
+        );
+        println!(
+            "    Active synapses: {:>8}/{}",
+            active_synapses, synapse_count
+        );
         println!("    Dormant synapses:{:>8}", dormant_synapses);
 
         // Magnitude distribution — reveals u8 cap saturation
@@ -1267,17 +1470,43 @@ mod tests {
         for syn in cascade.synapses.iter() {
             let bucket = (syn.signal.magnitude as usize / 43).min(5);
             mag_buckets[bucket] += 1;
-            if syn.signal.magnitude == 255 { at_cap += 1; }
+            if syn.signal.magnitude == 255 {
+                at_cap += 1;
+            }
         }
         let bar = |n: u32| "#".repeat(((n as usize) + 4) / 5);
         println!("\n  MAGNITUDE DISTRIBUTION (each # = ~5 synapses)");
         println!("  -----------------------------------------------");
-        println!("    0-42:    {:>4}  {}", mag_buckets[0], bar(mag_buckets[0]));
-        println!("    43-84:   {:>4}  {}", mag_buckets[1], bar(mag_buckets[1]));
-        println!("    85-127:  {:>4}  {}", mag_buckets[2], bar(mag_buckets[2]));
-        println!("    128-170: {:>4}  {}", mag_buckets[3], bar(mag_buckets[3]));
-        println!("    171-212: {:>4}  {}", mag_buckets[4], bar(mag_buckets[4]));
-        println!("    213-255: {:>4}  {}", mag_buckets[5], bar(mag_buckets[5]));
+        println!(
+            "    0-42:    {:>4}  {}",
+            mag_buckets[0],
+            bar(mag_buckets[0])
+        );
+        println!(
+            "    43-84:   {:>4}  {}",
+            mag_buckets[1],
+            bar(mag_buckets[1])
+        );
+        println!(
+            "    85-127:  {:>4}  {}",
+            mag_buckets[2],
+            bar(mag_buckets[2])
+        );
+        println!(
+            "    128-170: {:>4}  {}",
+            mag_buckets[3],
+            bar(mag_buckets[3])
+        );
+        println!(
+            "    171-212: {:>4}  {}",
+            mag_buckets[4],
+            bar(mag_buckets[4])
+        );
+        println!(
+            "    213-255: {:>4}  {}",
+            mag_buckets[5],
+            bar(mag_buckets[5])
+        );
         println!("    At cap (255): {}", at_cap);
 
         // Per-pathway magnitude breakdown
@@ -1294,21 +1523,37 @@ mod tests {
             if src < sensory_end {
                 sen_inter_sum += syn.signal.magnitude as u32;
                 sen_inter_n += 1;
-                if syn.signal.magnitude == 255 { sen_inter_cap += 1; }
+                if syn.signal.magnitude == 255 {
+                    sen_inter_cap += 1;
+                }
             } else if src < inter_end {
                 inter_motor_sum += syn.signal.magnitude as u32;
                 inter_motor_n += 1;
-                if syn.signal.magnitude == 255 { inter_motor_cap += 1; }
+                if syn.signal.magnitude == 255 {
+                    inter_motor_cap += 1;
+                }
             }
         }
-        let sen_inter_mean = if sen_inter_n > 0 { sen_inter_sum as f32 / sen_inter_n as f32 } else { 0.0 };
-        let inter_motor_mean = if inter_motor_n > 0 { inter_motor_sum as f32 / inter_motor_n as f32 } else { 0.0 };
+        let sen_inter_mean = if sen_inter_n > 0 {
+            sen_inter_sum as f32 / sen_inter_n as f32
+        } else {
+            0.0
+        };
+        let inter_motor_mean = if inter_motor_n > 0 {
+            inter_motor_sum as f32 / inter_motor_n as f32
+        } else {
+            0.0
+        };
         println!("\n  PER-PATHWAY MAGNITUDE");
         println!("  ----------------------");
-        println!("    Sensory->Inter:  mean {:>6.1}, at cap: {:>3}/{} (started at 100)",
-            sen_inter_mean, sen_inter_cap, sen_inter_n);
-        println!("    Inter->Motor:    mean {:>6.1}, at cap: {:>3}/{} (started at 80)",
-            inter_motor_mean, inter_motor_cap, inter_motor_n);
+        println!(
+            "    Sensory->Inter:  mean {:>6.1}, at cap: {:>3}/{} (started at 100)",
+            sen_inter_mean, sen_inter_cap, sen_inter_n
+        );
+        println!(
+            "    Inter->Motor:    mean {:>6.1}, at cap: {:>3}/{} (started at 80)",
+            inter_motor_mean, inter_motor_cap, inter_motor_n
+        );
 
         // ================================================================
         // REFLEX ARC DIAGNOSTIC — Can signals physically traverse the gap?
@@ -1326,18 +1571,35 @@ mod tests {
         let reflex_total = reflex_neurons.len();
 
         // Identify sensory and motor neuron indices
-        let sensory_indices: Vec<usize> = reflex_neurons.iter().enumerate()
-            .filter(|(_, n)| n.nuclei.is_sensory()).map(|(i, _)| i).collect();
-        let motor_indices: Vec<usize> = reflex_neurons.iter().enumerate()
-            .filter(|(_, n)| n.nuclei.is_motor()).map(|(i, _)| i).collect();
+        let sensory_indices: Vec<usize> = reflex_neurons
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.nuclei.is_sensory())
+            .map(|(i, _)| i)
+            .collect();
+        let motor_indices: Vec<usize> = reflex_neurons
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| n.nuclei.is_motor())
+            .map(|(i, _)| i)
+            .collect();
 
         // Measure the physical gap
-        let avg_sensory_x: f32 = sensory_indices.iter()
-            .map(|&i| reflex_neurons[i].soma.position[0]).sum::<f32>() / sensory_indices.len() as f32;
-        let avg_motor_x: f32 = motor_indices.iter()
-            .map(|&i| reflex_neurons[i].soma.position[0]).sum::<f32>() / motor_indices.len() as f32;
+        let avg_sensory_x: f32 = sensory_indices
+            .iter()
+            .map(|&i| reflex_neurons[i].soma.position[0])
+            .sum::<f32>()
+            / sensory_indices.len() as f32;
+        let avg_motor_x: f32 = motor_indices
+            .iter()
+            .map(|&i| reflex_neurons[i].soma.position[0])
+            .sum::<f32>()
+            / motor_indices.len() as f32;
         let gap = (avg_motor_x - avg_sensory_x).abs();
-        println!("    Sensory→Motor gap: {:.1} units (avg x: {:.1} → {:.1})", gap, avg_sensory_x, avg_motor_x);
+        println!(
+            "    Sensory→Motor gap: {:.1} units (avg x: {:.1} → {:.1})",
+            gap, avg_sensory_x, avg_motor_x
+        );
 
         // Wire ALL sensory → a motor neuron each (whichever sensory fires, there's a path)
         for k in 0..sensory_indices.len() {
@@ -1350,8 +1612,10 @@ mod tests {
             ));
         }
         reflex_synapses.rebuild_index(reflex_total);
-        println!("    Reflex synapses:   {} direct sensory→motor (magnitude=255, current=2040)",
-            sensory_indices.len());
+        println!(
+            "    Reflex synapses:   {} direct sensory→motor (magnitude=255, current=2040)",
+            sensory_indices.len()
+        );
         println!("    Threshold gap:     1500 from resting (-7000 → -5500)");
 
         let mut reflex_cascade = SpatialCascade::with_network(
@@ -1382,8 +1646,12 @@ mod tests {
             // Track peak values
             for (k, &si) in sensory_indices.iter().enumerate() {
                 let m = reflex_cascade.neurons[si].membrane;
-                if m > peak_membrane[k] { peak_membrane[k] = m; }
-                if mfcc_reflex[k].abs() > peak_mfcc[k] { peak_mfcc[k] = mfcc_reflex[k].abs(); }
+                if m > peak_membrane[k] {
+                    peak_membrane[k] = m;
+                }
+                if mfcc_reflex[k].abs() > peak_mfcc[k] {
+                    peak_mfcc[k] = mfcc_reflex[k].abs();
+                }
             }
 
             reflex_time += frame_interval;
@@ -1409,66 +1677,118 @@ mod tests {
         }
 
         let physics_ok = reflex_motor_fired > 0;
-        println!("    Frames processed:  {} ({:.0}ms)", test_frames, test_frames as f64 * 10.0);
-        println!("    Sensory fired:     {}/{}", reflex_sensory_fired, sensory_indices.len());
-        println!("    Motor fired:       {}/{}", reflex_motor_fired, motor_indices.len());
+        println!(
+            "    Frames processed:  {} ({:.0}ms)",
+            test_frames,
+            test_frames as f64 * 10.0
+        );
+        println!(
+            "    Sensory fired:     {}/{}",
+            reflex_sensory_fired,
+            sensory_indices.len()
+        );
+        println!(
+            "    Motor fired:       {}/{}",
+            reflex_motor_fired,
+            motor_indices.len()
+        );
         // Show first 8 motor neurons for diagnostics
         for &(mi, membrane, last_spike) in reflex_motor_samples.iter().take(8) {
             let spiked = if last_spike > 0 { "SPIKED" } else { "silent" };
-            println!("      Motor[{}]: membrane={:>6}, last_spike={}us [{}]",
-                mi, membrane, last_spike, spiked);
+            println!(
+                "      Motor[{}]: membrane={:>6}, last_spike={}us [{}]",
+                mi, membrane, last_spike, spiked
+            );
         }
 
         // Sensory neuron diagnostics — what's happening at the injection site?
         let global_peak = peak_membrane.iter().copied().max().unwrap_or(i16::MIN);
         let global_peak_mfcc = peak_mfcc.iter().copied().fold(0.0f32, f32::max);
-        println!("    Peak sensory membrane: {} (threshold={})", global_peak, SpatialNeuron::DEFAULT_THRESHOLD);
-        println!("    Peak MFCC |value|:     {:.3} (inject current: {:.0})",
-            global_peak_mfcc, global_peak_mfcc * 2000.0);
+        println!(
+            "    Peak sensory membrane: {} (threshold={})",
+            global_peak,
+            SpatialNeuron::DEFAULT_THRESHOLD
+        );
+        println!(
+            "    Peak MFCC |value|:     {:.3} (inject current: {:.0})",
+            global_peak_mfcc,
+            global_peak_mfcc * 2000.0
+        );
         // Show per-bin peaks for first 10
         for k in 0..10.min(sensory_indices.len()) {
-            println!("      Bin[{}]: peak_membrane={:>6}, peak_|mfcc|={:.3} (current={:.0})",
-                k, peak_membrane[k], peak_mfcc[k], peak_mfcc[k] * 2000.0);
+            println!(
+                "      Bin[{}]: peak_membrane={:>6}, peak_|mfcc|={:.3} (current={:.0})",
+                k,
+                peak_membrane[k],
+                peak_mfcc[k],
+                peak_mfcc[k] * 2000.0
+            );
         }
 
         if physics_ok {
             println!("    ==> PHYSICS OK: Signals traverse sensory→motor gap");
         } else if reflex_sensory_fired == 0 {
             println!("    ==> SENSORY SILENT: Injection current too weak to cross threshold");
-            println!("        Peak membrane {} vs threshold {}, gap = {}",
-                global_peak, SpatialNeuron::DEFAULT_THRESHOLD,
-                SpatialNeuron::DEFAULT_THRESHOLD - global_peak);
+            println!(
+                "        Peak membrane {} vs threshold {}, gap = {}",
+                global_peak,
+                SpatialNeuron::DEFAULT_THRESHOLD,
+                SpatialNeuron::DEFAULT_THRESHOLD - global_peak
+            );
         } else {
-            println!("    ==> PHYSICS BLOCKED: Sensory fires but signal dies before reaching motor");
+            println!(
+                "    ==> PHYSICS BLOCKED: Sensory fires but signal dies before reaching motor"
+            );
         }
 
         println!("\n  VERDICT");
         println!("  -------");
 
         let realtime_capable = run_ms < simulated_s * 1000.0;
-        println!("    Real-time:       {} ({}x)",
+        println!(
+            "    Real-time:       {} ({}x)",
             if realtime_capable { "YES" } else { "NO" },
-            (simulated_s * 1000.0 / run_ms) as i32);
-        println!("    Utilization:     Sensory {:.0}% / Inter {:.0}% / Motor {:.0}%",
-            sensory_util * 100.0, inter_util * 100.0, motor_util * 100.0);
+            (simulated_s * 1000.0 / run_ms) as i32
+        );
+        println!(
+            "    Utilization:     Sensory {:.0}% / Inter {:.0}% / Motor {:.0}%",
+            sensory_util * 100.0,
+            inter_util * 100.0,
+            motor_util * 100.0
+        );
         println!("    Regions:         {}", regions.len());
-        println!("    Migration:       {:.3} mean / {:.3} max units",
-            mean_displacement, max_displacement);
-        println!("    Reflex arc:      {}", if physics_ok { "PHYSICS OK" } else { "BLOCKED" });
+        println!(
+            "    Migration:       {:.3} mean / {:.3} max units",
+            mean_displacement, max_displacement
+        );
+        println!(
+            "    Reflex arc:      {}",
+            if physics_ok { "PHYSICS OK" } else { "BLOCKED" }
+        );
 
         if realtime_capable && physics_ok {
             println!("\n    ==> REAL AUDIO: PASSES");
         } else {
-            if !realtime_capable { println!("\n    ==> NEEDS OPTIMIZATION (too slow)"); }
-            if !physics_ok { println!("\n    ==> NEEDS TUNING (signals can't reach motor)"); }
+            if !realtime_capable {
+                println!("\n    ==> NEEDS OPTIMIZATION (too slow)");
+            }
+            if !physics_ok {
+                println!("\n    ==> NEEDS TUNING (signals can't reach motor)");
+            }
         }
 
         println!("\n{}\n", "=".repeat(70));
 
         // Assertions
-        assert!(realtime_capable, "Must process real LibriSpeech faster than real-time");
+        assert!(
+            realtime_capable,
+            "Must process real LibriSpeech faster than real-time"
+        );
         assert!(total_frames > 0, "Must have processed at least some frames");
-        assert!(physics_ok, "Reflex arc: signals must be able to traverse sensory→motor gap");
+        assert!(
+            physics_ok,
+            "Reflex arc: signals must be able to traverse sensory→motor gap"
+        );
     }
 
     // ========================================================================
@@ -1511,8 +1831,13 @@ mod tests {
             if frame % 1000 == 999 {
                 let elapsed = start.elapsed().as_secs_f64();
                 let simulated = (frame + 1) as f64 * 0.01; // seconds
-                println!("  Frame {}: {:.1}s simulated in {:.1}s real ({:.1}x)",
-                    frame + 1, simulated, elapsed, simulated / elapsed);
+                println!(
+                    "  Frame {}: {:.1}s simulated in {:.1}s real ({:.1}x)",
+                    frame + 1,
+                    simulated,
+                    elapsed,
+                    simulated / elapsed
+                );
             }
         }
 
@@ -1526,9 +1851,15 @@ mod tests {
         println!("  Frames:            10,000");
         println!("  Simulated:         {:.1}s", simulated_time);
         println!("  Real time:         {:.1}s", total_time);
-        println!("  Speed ratio:       {:.1}x real-time", simulated_time / total_time);
+        println!(
+            "  Speed ratio:       {:.1}x real-time",
+            simulated_time / total_time
+        );
         println!("  Total spikes:      {}", cascade.total_spikes());
-        println!("  Spikes/sec:        {:.0}", cascade.total_spikes() as f64 / simulated_time);
+        println!(
+            "  Spikes/sec:        {:.0}",
+            cascade.total_spikes() as f64 / simulated_time
+        );
         println!("  Sensory util:      {:.1}%", sensory_util * 100.0);
         println!("  Interneuron util:  {:.1}%", inter_util * 100.0);
         println!("  Motor util:        {:.1}%", motor_util * 100.0);

@@ -1,9 +1,9 @@
 #![allow(deprecated)]
 //! Pool inspection and diagnostics.
 
-use crate::neuron::{NeuronType, flags};
+use crate::neuron::{flags, NeuronType};
 use crate::pool::{NeuronPool, SpatialDims};
-use crate::synapse::{ThermalState, maturity};
+use crate::synapse::{maturity, ThermalState};
 
 /// Distribution of synapses across thermal states.
 #[derive(Clone, Debug, Default)]
@@ -72,16 +72,37 @@ pub struct PoolStats {
 
 impl std::fmt::Display for PoolStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Pool '{}': {} neurons ({}E/{}I), {} synapses, dims={}x{}x{}",
-            self.name, self.n_neurons, self.n_excitatory, self.n_inhibitory,
-            self.n_synapses, self.dims.w, self.dims.h, self.dims.d)?;
-        writeln!(f, "  Tick: {}, Last spikes: {}", self.tick_count, self.last_spike_count)?;
+        writeln!(
+            f,
+            "Pool '{}': {} neurons ({}E/{}I), {} synapses, dims={}x{}x{}",
+            self.name,
+            self.n_neurons,
+            self.n_excitatory,
+            self.n_inhibitory,
+            self.n_synapses,
+            self.dims.w,
+            self.dims.h,
+            self.dims.d
+        )?;
+        writeln!(
+            f,
+            "  Tick: {}, Last spikes: {}",
+            self.tick_count, self.last_spike_count
+        )?;
         writeln!(f, "  Thermal: {}", self.thermal)?;
-        writeln!(f, "  Mean |weight|: {:.1}, Mean |eligibility|: {:.1}",
-            self.mean_weight_magnitude, self.mean_eligibility_magnitude)?;
-        writeln!(f, "  Growth: {:.2}x (initial={}), Active: {:.1}%, Syn/neuron: {:.1}",
-            self.growth_ratio, self.initial_neuron_count,
-            self.active_ratio * 100.0, self.synapses_per_neuron)?;
+        writeln!(
+            f,
+            "  Mean |weight|: {:.1}, Mean |eligibility|: {:.1}",
+            self.mean_weight_magnitude, self.mean_eligibility_magnitude
+        )?;
+        writeln!(
+            f,
+            "  Growth: {:.2}x (initial={}), Active: {:.1}%, Syn/neuron: {:.1}",
+            self.growth_ratio,
+            self.initial_neuron_count,
+            self.active_ratio * 100.0,
+            self.synapses_per_neuron
+        )?;
         Ok(())
     }
 }
@@ -131,12 +152,27 @@ impl NeuronPool {
         let types = self.type_distribution();
 
         let n_syn = self.synapses.total_synapses();
-        let (weight_sum, elig_sum) = self.synapses.synapses.iter().fold((0u64, 0u64), |(ws, es), s| {
-            (ws + s.weight.unsigned_abs() as u64, es + s.eligibility.unsigned_abs() as u64)
-        });
+        let (weight_sum, elig_sum) =
+            self.synapses
+                .synapses
+                .iter()
+                .fold((0u64, 0u64), |(ws, es), s| {
+                    (
+                        ws + s.weight.unsigned_abs() as u64,
+                        es + s.eligibility.unsigned_abs() as u64,
+                    )
+                });
 
-        let mean_weight = if n_syn > 0 { weight_sum as f32 / n_syn as f32 } else { 0.0 };
-        let mean_elig = if n_syn > 0 { elig_sum as f32 / n_syn as f32 } else { 0.0 };
+        let mean_weight = if n_syn > 0 {
+            weight_sum as f32 / n_syn as f32
+        } else {
+            0.0
+        };
+        let mean_elig = if n_syn > 0 {
+            elig_sum as f32 / n_syn as f32
+        } else {
+            0.0
+        };
 
         let active_ratio = if self.n_neurons > 0 {
             self.active_neuron_count() as f32 / self.n_neurons as f32
@@ -198,7 +234,10 @@ mod tests {
         assert_eq!(stats.initial_neuron_count, 32);
         assert_eq!(stats.growth_ratio, 1.0);
         assert!(stats.active_ratio > 0.0, "some neurons should be active");
-        assert_eq!(stats.synapses_per_neuron, 0.0, "no connectivity = 0 syn/neuron");
+        assert_eq!(
+            stats.synapses_per_neuron, 0.0,
+            "no connectivity = 0 syn/neuron"
+        );
 
         // Grow and check ratio changes
         pool.grow_neurons_seeded(32, 42);

@@ -95,7 +95,7 @@ impl NeuronProfile {
     pub fn default_refractory(self) -> u8 {
         match self {
             Self::RegularSpiking => 2,
-            Self::FastSpiking => 1,       // rapid recovery — sustains high firing rate
+            Self::FastSpiking => 1, // rapid recovery — sustains high firing rate
             Self::IntrinsicBursting => 3, // longer gap — burst then pause
             Self::Reserved => 2,
         }
@@ -134,7 +134,11 @@ pub mod flags {
 
     /// Encode flags byte with all fields: inhibitory, profile, and neuron type.
     #[inline]
-    pub fn encode_full(inhibitory: bool, profile: super::NeuronProfile, ntype: super::NeuronType) -> u8 {
+    pub fn encode_full(
+        inhibitory: bool,
+        profile: super::NeuronProfile,
+        ntype: super::NeuronType,
+    ) -> u8 {
         let mut f = 0u8;
         if inhibitory {
             f |= INHIBITORY_BIT;
@@ -186,7 +190,6 @@ pub struct NeuronArrays {
     pub binding_slot: Vec<u8>,
 
     // === v4: Physical State (Spatial Brain) ===
-
     /// Soma (cell body) position in continuous 3D space.
     /// Role emerges from geometry: if axon stays local → gray matter processing,
     /// if axon leaves dense volume → "output" neuron.
@@ -263,9 +266,21 @@ impl NeuronArrays {
             let z = (i / (w as usize * h as usize)) as f32;
 
             // Scale to bounds
-            let sx = if w > 1 { bounds[0] * x / (w as f32 - 1.0) } else { bounds[0] * 0.5 };
-            let sy = if h > 1 { bounds[1] * y / (h as f32 - 1.0) } else { bounds[1] * 0.5 };
-            let sz = if d > 1 { bounds[2] * z / (d as f32 - 1.0) } else { bounds[2] * 0.5 };
+            let sx = if w > 1 {
+                bounds[0] * x / (w as f32 - 1.0)
+            } else {
+                bounds[0] * 0.5
+            };
+            let sy = if h > 1 {
+                bounds[1] * y / (h as f32 - 1.0)
+            } else {
+                bounds[1] * 0.5
+            };
+            let sz = if d > 1 {
+                bounds[2] * z / (d as f32 - 1.0)
+            } else {
+                bounds[2] * 0.5
+            };
 
             self.soma_position[i] = [sx, sy, sz];
             self.axon_terminal[i] = [sx, sy, sz]; // Starts at soma
@@ -346,7 +361,9 @@ impl NeuronArrays {
     pub fn remove_descending(&mut self, indices: &[usize]) -> usize {
         let mut removed = 0;
         for &idx in indices {
-            if idx >= self.membrane.len() { continue; }
+            if idx >= self.membrane.len() {
+                continue;
+            }
             self.membrane.swap_remove(idx);
             self.threshold.swap_remove(idx);
             self.leak.swap_remove(idx);
@@ -435,7 +452,14 @@ impl NeuronArrays {
     /// Grow axon one step toward direction, returning true if successful.
     ///
     /// Growth fails probabilistically based on local density (resistance).
-    pub fn grow_axon_step(&mut self, neuron_idx: usize, direction: [f32; 3], density_sigma: f32, resistance_factor: f32, seed: u64) -> bool {
+    pub fn grow_axon_step(
+        &mut self,
+        neuron_idx: usize,
+        direction: [f32; 3],
+        density_sigma: f32,
+        resistance_factor: f32,
+        seed: u64,
+    ) -> bool {
         if neuron_idx >= self.len() {
             return false;
         }
@@ -452,7 +476,9 @@ impl NeuronArrays {
         let resistance = (density * resistance_factor).min(1.0);
 
         // Probabilistic growth based on resistance
-        let rng = seed.wrapping_mul(6364136223846793005).wrapping_add(neuron_idx as u64);
+        let rng = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(neuron_idx as u64);
         let rand_val = ((rng >> 32) as u32) as f32 / u32::MAX as f32;
 
         if rand_val > resistance {
@@ -503,11 +529,17 @@ mod tests {
 
         // First 80 are excitatory
         for i in 0..80 {
-            assert!(flags::is_excitatory(arr.flags[i]), "neuron {i} should be excitatory");
+            assert!(
+                flags::is_excitatory(arr.flags[i]),
+                "neuron {i} should be excitatory"
+            );
         }
         // Last 20 are inhibitory
         for i in 80..100 {
-            assert!(flags::is_inhibitory(arr.flags[i]), "neuron {i} should be inhibitory");
+            assert!(
+                flags::is_inhibitory(arr.flags[i]),
+                "neuron {i} should be inhibitory"
+            );
         }
     }
 
@@ -515,7 +547,10 @@ mod tests {
     fn profile_encoding() {
         let f = flags::encode(false, NeuronProfile::IntrinsicBursting);
         assert!(flags::is_excitatory(f));
-        assert_eq!(NeuronProfile::from_flags(f), NeuronProfile::IntrinsicBursting);
+        assert_eq!(
+            NeuronProfile::from_flags(f),
+            NeuronProfile::IntrinsicBursting
+        );
 
         let f2 = flags::encode(true, NeuronProfile::FastSpiking);
         assert!(flags::is_inhibitory(f2));

@@ -17,11 +17,9 @@
 //! ```
 
 use super::{
-    SpatialCascade, SpatialCascadeConfig, SpatialNeuron, SpatialSynapseStore,
-    TissueConfig, TissueField,
-    MigrationConfig, CorrelationTracker, migrate_step,
-    PruningConfig, DormancyTracker, pruning_cycle, hard_prune,
-    MasteryConfig, MasteryState, PolarityChange, HubTracker,
+    hard_prune, migrate_step, pruning_cycle, CorrelationTracker, DormancyTracker, HubTracker,
+    MasteryConfig, MasteryState, MigrationConfig, PolarityChange, PruningConfig, SpatialCascade,
+    SpatialCascadeConfig, SpatialNeuron, SpatialSynapseStore, TissueConfig, TissueField,
 };
 
 /// Configuration for the spatial runtime.
@@ -228,7 +226,9 @@ impl SpatialRuntime {
         let target_time = self.time_us + frame_interval_us;
 
         // Cascade propagation with tissue physics
-        let spikes = self.cascade.run_until_with_tissue(target_time, &self.tissue);
+        let spikes = self
+            .cascade
+            .run_until_with_tissue(target_time, &self.tissue);
 
         // Per-frame stamina recovery (before correlation tracking)
         self.cascade.recover_stamina(frame_interval_us);
@@ -323,15 +323,15 @@ impl SpatialRuntime {
 
         // Phase 1: Sub-threshold aware Hebbian pressure
         for (syn_idx, &(src, tgt)) in syn_info.iter().enumerate() {
-            let src_fired =
-                self.cascade.neurons[src as usize].last_spike_us > self.time_us.saturating_sub(window);
+            let src_fired = self.cascade.neurons[src as usize].last_spike_us
+                > self.time_us.saturating_sub(window);
             if !src_fired {
                 continue;
             }
 
             let activity = self.cascade.neurons[src as usize].trace as f32 / 255.0;
-            let tgt_fired =
-                self.cascade.neurons[tgt as usize].last_spike_us > self.time_us.saturating_sub(window);
+            let tgt_fired = self.cascade.neurons[tgt as usize].last_spike_us
+                > self.time_us.saturating_sub(window);
             let tgt_membrane = self.cascade.neurons[tgt as usize].membrane;
 
             let (direction, eff_activity): (i8, f32) = if tgt_fired {
@@ -342,7 +342,8 @@ impl SpatialRuntime {
                 (-1, activity)
             };
 
-            self.mastery.accumulate_pressure(syn_idx, eff_activity, direction);
+            self.mastery
+                .accumulate_pressure(syn_idx, eff_activity, direction);
             self.hub_tracker.record_activation(tgt, 1);
         }
 
@@ -370,7 +371,8 @@ impl SpatialRuntime {
         }
 
         self.hub_tracker.clear_activation();
-        self.mastery.add_budget(self.config.mastery_budget_per_cycle);
+        self.mastery
+            .add_budget(self.config.mastery_budget_per_cycle);
         self.learning.cycles += 1;
     }
 

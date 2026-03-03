@@ -156,7 +156,8 @@ impl SpatialNeuron {
         let decay = (-(dt_us as f32) / tau).exp();
         let delta_from_rest = self.membrane as i32 - Self::RESTING_POTENTIAL as i32;
         let decayed = (delta_from_rest as f32 * decay) as i32;
-        self.membrane = (Self::RESTING_POTENTIAL as i32 + decayed).clamp(i16::MIN as i32, i16::MAX as i32) as i16;
+        self.membrane = (Self::RESTING_POTENTIAL as i32 + decayed)
+            .clamp(i16::MIN as i32, i16::MAX as i32) as i16;
 
         // Stamina recovery is handled per-frame by the runtime, NOT here.
         // This prevents the event-driven cascade from trickling recovery

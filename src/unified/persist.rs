@@ -92,15 +92,20 @@ impl UnifiedPool {
                 format!("unsupported version: {}", version),
             ));
         }
-        let _n_neurons_header = u32::from_le_bytes([file_data[6], file_data[7], file_data[8], file_data[9]]);
-        let expected_crc = u32::from_le_bytes([file_data[10], file_data[11], file_data[12], file_data[13]]);
+        let _n_neurons_header =
+            u32::from_le_bytes([file_data[6], file_data[7], file_data[8], file_data[9]]);
+        let expected_crc =
+            u32::from_le_bytes([file_data[10], file_data[11], file_data[12], file_data[13]]);
 
         let body = &file_data[14..];
         let actual_crc = crc32(body);
         if actual_crc != expected_crc {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("CRC mismatch: expected {:08X}, got {:08X}", expected_crc, actual_crc),
+                format!(
+                    "CRC mismatch: expected {:08X}, got {:08X}",
+                    expected_crc, actual_crc
+                ),
             ));
         }
 
@@ -143,13 +148,27 @@ impl UnifiedPool {
 
 // === Serialization Helpers ===
 
-fn write_u8(w: &mut Vec<u8>, v: u8) { w.push(v); }
-fn write_i8(w: &mut Vec<u8>, v: i8) { w.push(v as u8); }
-fn write_u16(w: &mut Vec<u8>, v: u16) { w.extend_from_slice(&v.to_le_bytes()); }
-fn write_i16(w: &mut Vec<u8>, v: i16) { w.extend_from_slice(&v.to_le_bytes()); }
-fn write_u32(w: &mut Vec<u8>, v: u32) { w.extend_from_slice(&v.to_le_bytes()); }
-fn write_u64(w: &mut Vec<u8>, v: u64) { w.extend_from_slice(&v.to_le_bytes()); }
-fn write_f32(w: &mut Vec<u8>, v: f32) { w.extend_from_slice(&v.to_le_bytes()); }
+fn write_u8(w: &mut Vec<u8>, v: u8) {
+    w.push(v);
+}
+fn write_i8(w: &mut Vec<u8>, v: i8) {
+    w.push(v as u8);
+}
+fn write_u16(w: &mut Vec<u8>, v: u16) {
+    w.extend_from_slice(&v.to_le_bytes());
+}
+fn write_i16(w: &mut Vec<u8>, v: i16) {
+    w.extend_from_slice(&v.to_le_bytes());
+}
+fn write_u32(w: &mut Vec<u8>, v: u32) {
+    w.extend_from_slice(&v.to_le_bytes());
+}
+fn write_u64(w: &mut Vec<u8>, v: u64) {
+    w.extend_from_slice(&v.to_le_bytes());
+}
+fn write_f32(w: &mut Vec<u8>, v: f32) {
+    w.extend_from_slice(&v.to_le_bytes());
+}
 
 fn read_u8(r: &mut &[u8]) -> io::Result<u8> {
     let mut buf = [0u8; 1];
@@ -264,7 +283,11 @@ fn read_neuron(r: &mut &[u8]) -> io::Result<UnifiedNeuron> {
     let tz = read_f32(r)?;
     let myelin = read_u8(r)?;
     let health = read_u8(r)?;
-    let axon = Axon { terminal: [tx, ty, tz], myelin, health };
+    let axon = Axon {
+        terminal: [tx, ty, tz],
+        myelin,
+        health,
+    };
 
     // Nuclei
     let soma_size = read_u8(r)?;
@@ -285,7 +308,10 @@ fn read_neuron(r: &mut &[u8]) -> io::Result<UnifiedNeuron> {
         kind,
         target,
         modality,
-        gates: EnergyGates { low_ceiling, high_floor },
+        gates: EnergyGates {
+            low_ceiling,
+            high_floor,
+        },
     };
     let polarity = match polarity_i8 {
         1 => Polarity::Positive,
@@ -293,8 +319,15 @@ fn read_neuron(r: &mut &[u8]) -> io::Result<UnifiedNeuron> {
         _ => Polarity::Zero,
     };
     let nuclei = Nuclei::new(
-        soma_size, axon_affinity, myelin_affinity, metabolic_rate,
-        leak, refractory, oscillation_period, interface, polarity,
+        soma_size,
+        axon_affinity,
+        myelin_affinity,
+        metabolic_rate,
+        leak,
+        refractory,
+        oscillation_period,
+        interface,
+        polarity,
     );
 
     // Create neuron (sets zone_weights from nuclei)
@@ -344,7 +377,11 @@ fn read_synapse(r: &mut &[u8]) -> io::Result<UnifiedSynapse> {
         _ => DendriticZone::Feedback,
     };
 
-    let signal = ternary_signal::Signal { polarity, magnitude };
+    let signal = ternary_signal::Signal {
+        polarity,
+        magnitude,
+        multiplier: 1,
+    };
 
     Ok(UnifiedSynapse {
         source,
@@ -410,7 +447,12 @@ fn read_disc(r: &mut &[u8]) -> io::Result<ImaginalDisc> {
         3 => RegionArchetype::BasalGanglia,
         4 => RegionArchetype::Cerebellar,
         5 => RegionArchetype::Brainstem,
-        _ => return Err(io::Error::new(io::ErrorKind::InvalidData, "unknown archetype")),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "unknown archetype",
+            ))
+        }
     };
 
     let distribution = NucleiDistribution {
@@ -431,7 +473,11 @@ fn read_disc(r: &mut &[u8]) -> io::Result<ImaginalDisc> {
     let max_fanout = read_u16(r)?;
     let max_fanin = read_u16(r)?;
 
-    let mut zone_biases = [ZoneBias { zone: DendriticZone::Feedforward, probability: 0, magnitude: 0 }; 3];
+    let mut zone_biases = [ZoneBias {
+        zone: DendriticZone::Feedforward,
+        probability: 0,
+        magnitude: 0,
+    }; 3];
     for i in 0..3 {
         let zone_idx = read_u8(r)?;
         let probability = read_u8(r)?;
@@ -488,9 +534,9 @@ fn crc32(data: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::disc::RegionArchetype;
     use super::super::incubate::{incubate, IncubateConfig};
+    use super::*;
 
     #[test]
     fn save_load_round_trip() {

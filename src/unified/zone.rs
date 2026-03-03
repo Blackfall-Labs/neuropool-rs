@@ -182,7 +182,10 @@ mod tests {
         let w = ZoneWeights::RELAY;
         let ff_only = w.combine(1000, 0, 0);
         let ctx_only = w.combine(0, 1000, 0);
-        assert!(ff_only > ctx_only * 4, "relay should be feedforward-dominant");
+        assert!(
+            ff_only > ctx_only * 4,
+            "relay should be feedforward-dominant"
+        );
     }
 
     #[test]

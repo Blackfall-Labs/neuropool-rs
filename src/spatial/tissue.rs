@@ -368,13 +368,16 @@ impl TissueField {
         self.axon_segments.clear();
         self.axon_segments.reserve(neurons.len());
         for (idx, neuron) in neurons.iter().enumerate() {
-            self.axon_segments.push(AxonSegment::from_neuron(idx as u32, neuron));
+            self.axon_segments
+                .push(AxonSegment::from_neuron(idx as u32, neuron));
         }
 
         // Preserve existing tissue state, extend for new neurons
         if neurons.len() > old_count {
-            self.resistance.resize(neurons.len(), self.config.baseline_resistance);
-            self.conductivity.resize(neurons.len(), self.config.baseline_conductivity);
+            self.resistance
+                .resize(neurons.len(), self.config.baseline_resistance);
+            self.conductivity
+                .resize(neurons.len(), self.config.baseline_conductivity);
         } else if self.resistance.is_empty() {
             // First rebuild — initialize all to baseline
             self.resistance = vec![self.config.baseline_resistance; neurons.len()];
@@ -404,7 +407,12 @@ impl TissueField {
         if self.resistance.is_empty() {
             return self.config.baseline_resistance;
         }
-        self.interpolate_field(pos, neurons, &self.resistance, self.config.baseline_resistance)
+        self.interpolate_field(
+            pos,
+            neurons,
+            &self.resistance,
+            self.config.baseline_resistance,
+        )
     }
 
     /// Kernel-interpolated conductivity at an arbitrary 3D position.
@@ -415,7 +423,12 @@ impl TissueField {
         if self.conductivity.is_empty() {
             return self.config.baseline_conductivity;
         }
-        self.interpolate_field(pos, neurons, &self.conductivity, self.config.baseline_conductivity)
+        self.interpolate_field(
+            pos,
+            neurons,
+            &self.conductivity,
+            self.config.baseline_conductivity,
+        )
     }
 
     /// Generic kernel-interpolated field query.
@@ -470,7 +483,8 @@ impl TissueField {
             if active_mask[i] {
                 // Active pathway: soften resistance, boost conductivity
                 self.resistance[i] = (self.resistance[i] - self.config.softening_rate).max(0.0);
-                self.conductivity[i] = (self.conductivity[i] + self.config.conductivity_growth_rate).min(1.0);
+                self.conductivity[i] =
+                    (self.conductivity[i] + self.config.conductivity_growth_rate).min(1.0);
             } else {
                 // Inactive: stiffen back toward baseline, conductivity decays
                 if self.resistance[i] < self.config.baseline_resistance {
@@ -478,7 +492,8 @@ impl TissueField {
                         .min(self.config.baseline_resistance);
                 }
                 if self.conductivity[i] > self.config.baseline_conductivity {
-                    self.conductivity[i] = (self.conductivity[i] - self.config.conductivity_decay_rate)
+                    self.conductivity[i] = (self.conductivity[i]
+                        - self.config.conductivity_decay_rate)
                         .max(self.config.baseline_conductivity);
                 }
             }
@@ -590,11 +605,7 @@ impl TissueField {
         }
 
         // Coherence = magnitude of average direction
-        let avg_dir = [
-            sum_dir[0] / count,
-            sum_dir[1] / count,
-            sum_dir[2] / count,
-        ];
+        let avg_dir = [sum_dir[0] / count, sum_dir[1] / count, sum_dir[2] / count];
         (avg_dir[0] * avg_dir[0] + avg_dir[1] * avg_dir[1] + avg_dir[2] * avg_dir[2]).sqrt()
     }
 
@@ -641,11 +652,7 @@ impl TissueField {
 
         for i in 0..samples {
             let t = (i as f32 + 0.5) / samples as f32;
-            let pos = [
-                from[0] + dx * t,
-                from[1] + dy * t,
-                from[2] + dz * t,
-            ];
+            let pos = [from[0] + dx * t, from[1] + dy * t, from[2] + dz * t];
 
             let tissue = self.tissue_at(pos, neurons);
             let velocity = self.config.base_velocity * tissue.velocity_factor();
@@ -1225,7 +1232,11 @@ mod tests {
 
         // Center of cluster should be gray matter
         let tissue = field.tissue_at([0.6, 0.6, 0.0], &neurons);
-        assert!(tissue.is_gray(), "Expected gray matter at soma cluster, got {:?}", tissue);
+        assert!(
+            tissue.is_gray(),
+            "Expected gray matter at soma cluster, got {:?}",
+            tissue
+        );
 
         // Far from cluster should be sparse
         let tissue_far = field.tissue_at([100.0, 100.0, 100.0], &neurons);
@@ -1269,7 +1280,10 @@ mod tests {
 
         // Verify gray matter at left cluster
         let tissue_left = field.tissue_at([0.0, 2.0, 0.0], &neurons);
-        assert!(tissue_left.is_gray(), "Expected gray matter at left cluster");
+        assert!(
+            tissue_left.is_gray(),
+            "Expected gray matter at left cluster"
+        );
     }
 
     #[test]
@@ -1288,7 +1302,8 @@ mod tests {
         field.rebuild(&neurons);
 
         // Measure delay through the tract (white matter)
-        let delay_through_tract = field.propagation_delay_us([0.0, 5.0, 0.0], [20.0, 5.0, 0.0], &neurons);
+        let delay_through_tract =
+            field.propagation_delay_us([0.0, 5.0, 0.0], [20.0, 5.0, 0.0], &neurons);
 
         // Measure delay through empty space (sparse)
         let delay_through_sparse =
@@ -1645,7 +1660,8 @@ mod tests {
         assert!(
             (r - baseline).abs() < 0.01,
             "Initial resistance should be near baseline {}, got {}",
-            baseline, r
+            baseline,
+            r
         );
     }
 
@@ -1664,7 +1680,8 @@ mod tests {
         assert!(
             (c - baseline).abs() < 0.01,
             "Initial conductivity should be near baseline {}, got {}",
-            baseline, c
+            baseline,
+            c
         );
     }
 
@@ -1687,8 +1704,14 @@ mod tests {
         let r_after = field.resistance_values()[0];
         let c_after = field.conductivity_values()[0];
 
-        assert!(r_after < r_before, "Active neuron resistance should decrease");
-        assert!(c_after > c_before, "Active neuron conductivity should increase");
+        assert!(
+            r_after < r_before,
+            "Active neuron resistance should decrease"
+        );
+        assert!(
+            c_after > c_before,
+            "Active neuron conductivity should increase"
+        );
 
         // Inactive neuron should stay at baseline
         assert_eq!(field.resistance_values()[1], r_before);
@@ -1707,8 +1730,10 @@ mod tests {
             field.update_plasticity(&[true]);
         }
         let softened_r = field.resistance_values()[0];
-        assert!(softened_r < field.config().baseline_resistance,
-            "Should have softened after activity");
+        assert!(
+            softened_r < field.config().baseline_resistance,
+            "Should have softened after activity"
+        );
 
         // Now let it stiffen back
         for _ in 0..200 {
@@ -1718,7 +1743,8 @@ mod tests {
         assert!(
             (recovered_r - field.config().baseline_resistance).abs() < 0.01,
             "Inactive tissue should stiffen back to baseline, got {} vs {}",
-            recovered_r, field.config().baseline_resistance
+            recovered_r,
+            field.config().baseline_resistance
         );
     }
 
@@ -1742,8 +1768,10 @@ mod tests {
         field.rebuild(&neurons);
 
         let r_after_rebuild = field.resistance_values()[0];
-        assert_eq!(r_before_rebuild, r_after_rebuild,
-            "Rebuild must preserve tissue state");
+        assert_eq!(
+            r_before_rebuild, r_after_rebuild,
+            "Rebuild must preserve tissue state"
+        );
     }
 
     #[test]
@@ -1764,8 +1792,11 @@ mod tests {
         let r_at_0 = field.resistance_at([0.0, 0.0, 0.0], &neurons);
         let r_at_1 = field.resistance_at([1.0, 0.0, 0.0], &neurons);
 
-        assert!(r_at_0 < r_at_1,
+        assert!(
+            r_at_0 < r_at_1,
             "Resistance near active neuron ({:.3}) should be lower than near inactive ({:.3})",
-            r_at_0, r_at_1);
+            r_at_0,
+            r_at_1
+        );
     }
 }

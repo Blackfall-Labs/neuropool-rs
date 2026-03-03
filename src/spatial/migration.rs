@@ -110,7 +110,8 @@ impl CorrelationTracker {
 
     /// Resize for new neuron count.
     pub fn resize(&mut self, neuron_count: usize) {
-        self.spike_times.resize_with(neuron_count, || Vec::with_capacity(self.max_spikes));
+        self.spike_times
+            .resize_with(neuron_count, || Vec::with_capacity(self.max_spikes));
     }
 
     /// Compute correlation between two neurons.
@@ -210,7 +211,8 @@ pub fn compute_migration_forces(
         let pos = neurons[i].soma.position;
 
         // Find correlated partners
-        let partners = correlations.correlated_partners(i, config.correlation_threshold, current_time);
+        let partners =
+            correlations.correlated_partners(i, config.correlation_threshold, current_time);
 
         // Attraction toward partners
         if !partners.is_empty() {
@@ -371,7 +373,8 @@ pub fn migrate_step(
     origins: Option<&[[f32; 3]]>,
     tissue: Option<&TissueField>,
 ) {
-    let forces = compute_migration_forces(neurons, correlations, config, current_time, origins, tissue);
+    let forces =
+        compute_migration_forces(neurons, correlations, config, current_time, origins, tissue);
     apply_migration(neurons, &forces, config);
 }
 

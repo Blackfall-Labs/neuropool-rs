@@ -166,7 +166,8 @@ pub fn decay_axon_health(
             neuron.axon.decay(config.inactivity_decay);
         } else {
             // Check activity
-            let active_count = outgoing.iter()
+            let active_count = outgoing
+                .iter()
                 .filter(|s| s.signal.magnitude >= config.activity_threshold)
                 .count();
 
@@ -196,7 +197,9 @@ pub fn decay_axon_health(
 pub fn retract_dead_axons(neurons: &mut [SpatialNeuron], config: &PruningConfig) {
     for neuron in neurons.iter_mut() {
         if !neuron.axon.is_alive() {
-            neuron.axon.retract_toward(neuron.soma.position, config.retraction_rate);
+            neuron
+                .axon
+                .retract_toward(neuron.soma.position, config.retraction_rate);
         }
     }
 }
@@ -279,7 +282,7 @@ mod tests {
     fn test_identify_prunable() {
         let mut store = SpatialSynapseStore::new(2);
         store.add(make_test_synapse(100)); // active
-        store.add(make_test_synapse(0));   // dormant
+        store.add(make_test_synapse(0)); // dormant
         store.rebuild_index(2);
 
         let mut dormancy = DormancyTracker::new(2);
@@ -377,7 +380,7 @@ mod tests {
 
         let mut store = SpatialSynapseStore::new(2);
         store.add(make_test_synapse(100)); // active
-        store.add(make_test_synapse(0));   // dormant
+        store.add(make_test_synapse(0)); // dormant
         store.rebuild_index(2);
 
         let mut dormancy = DormancyTracker::new(2);

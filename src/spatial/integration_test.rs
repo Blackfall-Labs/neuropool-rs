@@ -18,10 +18,9 @@
 #[cfg(test)]
 mod tests {
     use crate::spatial::{
-        Axon, CorrelationTracker, MigrationConfig, Nuclei, RegionConfig,
-        SpatialCascade, SpatialCascadeConfig, SpatialNeuron, SpatialSynapse,
-        SpatialSynapseStore, TissueConfig, TissueField, detect_regions,
-        compute_migration_forces, apply_migration,
+        apply_migration, compute_migration_forces, detect_regions, Axon, CorrelationTracker,
+        MigrationConfig, Nuclei, RegionConfig, SpatialCascade, SpatialCascadeConfig, SpatialNeuron,
+        SpatialSynapse, SpatialSynapseStore, TissueConfig, TissueField,
     };
 
     /// Character encoding: maps ASCII to neuron indices (0-127)
@@ -131,7 +130,8 @@ mod tests {
             // Neighboring inputs share targets (creates convergence)
             let base_inter = (i / 4) % pred_interneuron_count;
             for j in 0..4 {
-                let target_offset = ((base_inter as u32 + j * 8) % pred_interneuron_count as u32) as u32;
+                let target_offset =
+                    ((base_inter as u32 + j * 8) % pred_interneuron_count as u32) as u32;
                 let target = pred_inter_start + target_offset;
                 // With 8x scaling: magnitude 100 -> 800 current
                 // Need 2 converging inputs to cross threshold (1500 needed)
@@ -187,12 +187,7 @@ mod tests {
     ///
     /// Like Hush v2: dual/neighborhood sensory input creates coincidence detection.
     /// Multiple inputs firing together sum at hidden neurons to cross threshold.
-    fn inject_character(
-        cascade: &mut SpatialCascade,
-        c: char,
-        input_start: u32,
-        time_us: u64,
-    ) {
+    fn inject_character(cascade: &mut SpatialCascade, c: char, input_start: u32, time_us: u64) {
         let idx = char_to_idx(c);
         let target = input_start + idx as u32;
 
@@ -259,9 +254,8 @@ mod tests {
         let char_interval = 50_000; // 50ms per character
 
         // Track previous spike times to detect new spikes
-        let mut prev_spike_times: Vec<u64> = cascade.neurons.iter()
-            .map(|n| n.last_spike_us)
-            .collect();
+        let mut prev_spike_times: Vec<u64> =
+            cascade.neurons.iter().map(|n| n.last_spike_us).collect();
 
         for c in sequence.chars() {
             // Inject current character (strong enough to fire)
@@ -373,21 +367,33 @@ mod tests {
             timing_count as u32,
         );
 
-        println!("Created {} neurons, {} synapses", total_neurons, synapses.len());
+        println!(
+            "Created {} neurons, {} synapses",
+            total_neurons,
+            synapses.len()
+        );
 
         // Debug: check synapse connectivity
         let mut input_synapse_count = 0;
         for i in input_start..(input_start + input_count as u32) {
             input_synapse_count += synapses.outgoing(i).len();
         }
-        println!("Input neurons (0-{}) have {} outgoing synapses total", input_count - 1, input_synapse_count);
+        println!(
+            "Input neurons (0-{}) have {} outgoing synapses total",
+            input_count - 1,
+            input_synapse_count
+        );
 
         let mut interneuron_synapse_count = 0;
         for i in pred_start..(pred_start + pred_interneuron_count as u32) {
             interneuron_synapse_count += synapses.outgoing(i).len();
         }
-        println!("Interneurons ({}-{}) have {} outgoing synapses total",
-            pred_start, pred_start + pred_interneuron_count as u32 - 1, interneuron_synapse_count);
+        println!(
+            "Interneurons ({}-{}) have {} outgoing synapses total",
+            pred_start,
+            pred_start + pred_interneuron_count as u32 - 1,
+            interneuron_synapse_count
+        );
 
         // Create cascade
         let config = SpatialCascadeConfig {
@@ -407,9 +413,8 @@ mod tests {
 
         // Training data: common English patterns
         let training_sequences = [
-            "the ", "and ", "ing ", "tion", "her ", "for ", "ent ",
-            "ion ", "ter ", "was ", "you ", "ith ", "ver ", "all ",
-            "wit ", "thi ", "hat ", "his ", "eth ", "nth ", "oth ",
+            "the ", "and ", "ing ", "tion", "her ", "for ", "ent ", "ion ", "ter ", "was ", "you ",
+            "ith ", "ver ", "all ", "wit ", "thi ", "hat ", "his ", "eth ", "nth ", "oth ",
         ];
 
         let mut time = 0u64;
@@ -461,8 +466,14 @@ mod tests {
                 apply_migration(&mut cascade.neurons, &forces, &migration_config);
             }
 
-            println!("Epoch {} complete, time: {}ms, spikes: {}, events: {}, pending: {}",
-                epoch + 1, time / 1000, spikes_this_epoch, events, pending);
+            println!(
+                "Epoch {} complete, time: {}ms, spikes: {}, events: {}, pending: {}",
+                epoch + 1,
+                time / 1000,
+                spikes_this_epoch,
+                events,
+                pending
+            );
         }
 
         // ====================================================================
@@ -470,17 +481,19 @@ mod tests {
         // ====================================================================
 
         // Define neuron groups for correlation analysis
-        let input_group: Vec<usize> = (input_start as usize..(input_start as usize + input_count))
-            .collect();
-        let pred_interneuron_group: Vec<usize> = (pred_start as usize..(pred_start as usize + pred_interneuron_count))
-            .collect();
-        let timing_group: Vec<usize> = (timing_start as usize..(timing_start as usize + timing_count))
-            .collect();
+        let input_group: Vec<usize> =
+            (input_start as usize..(input_start as usize + input_count)).collect();
+        let pred_interneuron_group: Vec<usize> =
+            (pred_start as usize..(pred_start as usize + pred_interneuron_count)).collect();
+        let timing_group: Vec<usize> =
+            (timing_start as usize..(timing_start as usize + timing_count)).collect();
 
         // Calculate correlations between regions
-        let input_pred_corr = mean_correlation(&correlations, &input_group, &pred_interneuron_group, time);
+        let input_pred_corr =
+            mean_correlation(&correlations, &input_group, &pred_interneuron_group, time);
         let input_timing_corr = mean_correlation(&correlations, &input_group, &timing_group, time);
-        let pred_timing_corr = mean_correlation(&correlations, &pred_interneuron_group, &timing_group, time);
+        let pred_timing_corr =
+            mean_correlation(&correlations, &pred_interneuron_group, &timing_group, time);
 
         println!("\n=== Correlation Analysis ===");
         println!("Input ↔ Prediction: {:.4}", input_pred_corr);
@@ -582,10 +595,19 @@ mod tests {
         }
 
         println!("\n=== Timing Region ===");
-        println!("Active oscillators: {}/{}", oscillator_active, timing_count / 2);
+        println!(
+            "Active oscillators: {}/{}",
+            oscillator_active,
+            timing_count / 2
+        );
 
         // Timing region should be active but NOT correlated with input/prediction
-        let timing_self_corr = mean_correlation(&correlations, &timing_group[..16], &timing_group[16..], time);
+        let timing_self_corr = mean_correlation(
+            &correlations,
+            &timing_group[..16],
+            &timing_group[16..],
+            time,
+        );
         println!("Timing internal correlation: {:.4}", timing_self_corr);
 
         // The key test: timing region exists in same space but evolved independently
@@ -606,9 +628,18 @@ mod tests {
 
         println!("\n=== EMERGENT CO-WIRING SUMMARY ===");
         println!("✓ Three regions created in shared space");
-        println!("✓ Input and Prediction co-wired through learning (correlation: {:.4})", input_pred_corr);
-        println!("✓ Timing region remained independent (correlation: {:.4})", pred_timing_corr);
-        println!("✓ {} emergent regions detected from activity patterns", regions.len());
+        println!(
+            "✓ Input and Prediction co-wired through learning (correlation: {:.4})",
+            input_pred_corr
+        );
+        println!(
+            "✓ Timing region remained independent (correlation: {:.4})",
+            pred_timing_corr
+        );
+        println!(
+            "✓ {} emergent regions detected from activity patterns",
+            regions.len()
+        );
         println!("✓ Character prediction system functional");
         println!("\nStructure emerged from function. Co-wiring is real.");
     }
@@ -684,11 +715,8 @@ mod tests {
 
         synapses.rebuild_index(total);
 
-        let mut cascade = SpatialCascade::with_network(
-            neurons,
-            synapses,
-            SpatialCascadeConfig::default(),
-        );
+        let mut cascade =
+            SpatialCascade::with_network(neurons, synapses, SpatialCascadeConfig::default());
 
         // Train on clean patterns: 'a' → 'a', 'b' → 'b', etc. (identity)
         let mut time = 0u64;
@@ -723,7 +751,10 @@ mod tests {
             }
         }
 
-        println!("Input: 'a', Most active output: '{}'", (b'a' + max_idx as u8) as char);
+        println!(
+            "Input: 'a', Most active output: '{}'",
+            (b'a' + max_idx as u8) as char
+        );
 
         // The network should have some response
         assert!(
@@ -758,11 +789,8 @@ mod tests {
         // No synapses - these are independent oscillators
         let synapses = SpatialSynapseStore::new(neurons.len());
 
-        let mut cascade = SpatialCascade::with_network(
-            neurons,
-            synapses,
-            SpatialCascadeConfig::default(),
-        );
+        let mut cascade =
+            SpatialCascade::with_network(neurons, synapses, SpatialCascadeConfig::default());
         let mut correlations = CorrelationTracker::new(20, 50, 5_000);
 
         // Run for enough time to establish oscillation patterns

@@ -131,7 +131,8 @@ impl BindingTable {
         }
         let slot = self.next_slot;
         if self.entries.len() <= slot as usize {
-            self.entries.resize(slot as usize + 1, BindingConfig::default());
+            self.entries
+                .resize(slot as usize + 1, BindingConfig::default());
         }
         self.entries[slot as usize] = config;
         self.next_slot = self.next_slot.checked_add(1).unwrap_or(0);
@@ -152,7 +153,11 @@ impl BindingTable {
 
     /// Number of allocated entries (not counting the sentinel at slot 0).
     pub fn len(&self) -> usize {
-        if self.entries.len() <= 1 { 0 } else { self.entries.len() - 1 }
+        if self.entries.len() <= 1 {
+            0
+        } else {
+            self.entries.len() - 1
+        }
     }
 
     /// Whether the table has no entries.
@@ -167,7 +172,11 @@ impl BindingTable {
 
     /// Rebuild from a raw entries slice (including sentinel at index 0).
     pub fn from_entries(entries: Vec<BindingConfig>) -> Self {
-        let next_slot = if entries.len() >= 256 { 0 } else { entries.len() as u8 };
+        let next_slot = if entries.len() >= 256 {
+            0
+        } else {
+            entries.len() as u8
+        };
         Self { entries, next_slot }
     }
 }

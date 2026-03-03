@@ -308,7 +308,10 @@ fn main() {
         }
     }
 
-    let consol_totals: Vec<u32> = consolidation_spikes.iter().map(|v| v.iter().sum()).collect();
+    let consol_totals: Vec<u32> = consolidation_spikes
+        .iter()
+        .map(|v| v.iter().sum())
+        .collect();
     println!("  Activity during consolidation (should decay):");
     for (i, name) in ["Encoder", "Compressor", "Memory", "Decompressor", "Decoder"]
         .iter()
@@ -344,7 +347,8 @@ fn main() {
         }
 
         if tick % 8 == 0 {
-            let spike_summary: Vec<u32> = recall_spikes.iter().map(|v| *v.last().unwrap()).collect();
+            let spike_summary: Vec<u32> =
+                recall_spikes.iter().map(|v| *v.last().unwrap()).collect();
             println!(
                 "    Tick {:2}: Enc={} Cmp={} Mem={} Dec={} Out={}",
                 tick,
@@ -385,11 +389,7 @@ fn main() {
     println!("  Output range: {} to {}", min_output, max_output);
 
     // Check which decoder neuron is most active (WTA behavior)
-    if let Some((winner, _)) = output_membrane
-        .iter()
-        .enumerate()
-        .max_by_key(|(_, &v)| v)
-    {
+    if let Some((winner, _)) = output_membrane.iter().enumerate().max_by_key(|(_, &v)| v) {
         println!("  Winner neuron: {} (WTA output)", winner);
     }
 
@@ -528,7 +528,11 @@ fn main() {
     let all_pass = encoder_works && forward_propagation && memory_engaged;
     println!(
         "\n  Overall: {}",
-        if all_pass { "PIPELINE FUNCTIONAL" } else { "NEEDS WORK" }
+        if all_pass {
+            "PIPELINE FUNCTIONAL"
+        } else {
+            "NEEDS WORK"
+        }
     );
 
     println!("\n  What this proves:");

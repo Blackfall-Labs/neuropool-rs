@@ -4,8 +4,8 @@
 //! which compartment of the target neuron receives the signal.
 //! Storage is CSR (Compressed Sparse Row) for efficient outgoing iteration.
 
-use ternary_signal::Signal;
 use super::zone::DendriticZone;
+use ternary_signal::Signal;
 
 /// A synaptic connection with dendritic zone targeting.
 ///
@@ -359,9 +359,27 @@ mod tests {
     #[test]
     fn csr_store() {
         let mut store = UnifiedSynapseStore::new();
-        store.add(UnifiedSynapse::excitatory(0, 1, DendriticZone::Feedforward, 100, 500));
-        store.add(UnifiedSynapse::excitatory(0, 2, DendriticZone::Context, 80, 300));
-        store.add(UnifiedSynapse::excitatory(1, 3, DendriticZone::Feedforward, 60, 200));
+        store.add(UnifiedSynapse::excitatory(
+            0,
+            1,
+            DendriticZone::Feedforward,
+            100,
+            500,
+        ));
+        store.add(UnifiedSynapse::excitatory(
+            0,
+            2,
+            DendriticZone::Context,
+            80,
+            300,
+        ));
+        store.add(UnifiedSynapse::excitatory(
+            1,
+            3,
+            DendriticZone::Feedforward,
+            60,
+            200,
+        ));
         store.rebuild_index(4);
 
         assert_eq!(store.outgoing(0).len(), 2);
@@ -374,9 +392,21 @@ mod tests {
     #[test]
     fn prune_dormant_synapses() {
         let mut store = UnifiedSynapseStore::new();
-        store.add(UnifiedSynapse::excitatory(0, 1, DendriticZone::Feedforward, 100, 500));
+        store.add(UnifiedSynapse::excitatory(
+            0,
+            1,
+            DendriticZone::Feedforward,
+            100,
+            500,
+        ));
         store.add(UnifiedSynapse::dormant(0, 2, DendriticZone::Context, 300));
-        store.add(UnifiedSynapse::excitatory(1, 3, DendriticZone::Feedforward, 60, 200));
+        store.add(UnifiedSynapse::excitatory(
+            1,
+            3,
+            DendriticZone::Feedforward,
+            60,
+            200,
+        ));
 
         let pruned = store.prune_dormant();
         assert_eq!(pruned, 1);

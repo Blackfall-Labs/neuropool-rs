@@ -84,11 +84,11 @@ impl Default for SpatialCascadeConfig {
             propagation_speed_us_per_unit: 100.0, // 100μs per unit distance
             myelin_speed_factor: 0.5,             // myelinated axons are 1.5x faster
             max_events_per_call: 10_000,
-            tissue_delay_factor: 1.0,             // low-C tissue doubles delay at C=0
-            tissue_attenuation_factor: 0.2,       // real attenuation: 60% loss through stiff tissue over 15 units
-            tissue_path_samples: 3,               // 3-point path sampling
-            fast_coincidence_window_us: 1500,     // 1.5ms fast window (AMPA-like)
-            coincidence_boost: 0.5,               // up to 1.5x for near-simultaneous arrivals
+            tissue_delay_factor: 1.0, // low-C tissue doubles delay at C=0
+            tissue_attenuation_factor: 0.2, // real attenuation: 60% loss through stiff tissue over 15 units
+            tissue_path_samples: 3,         // 3-point path sampling
+            fast_coincidence_window_us: 1500, // 1.5ms fast window (AMPA-like)
+            coincidence_boost: 0.5,         // up to 1.5x for near-simultaneous arrivals
         }
     }
 }
@@ -206,9 +206,7 @@ impl SpatialCascade {
             if current != 0 {
                 // Find sensory neuron for channel i
                 for (idx, neuron) in self.neurons.iter().enumerate() {
-                    if neuron.nuclei.is_sensory()
-                        && neuron.nuclei.interface.target == i as u16
-                    {
+                    if neuron.nuclei.is_sensory() && neuron.nuclei.interface.target == i as u16 {
                         self.inject(idx as u32, current, time_us);
                         break;
                     }
@@ -277,11 +275,7 @@ impl SpatialCascade {
     }
 
     /// Core cascade loop, optionally tissue-aware.
-    fn run_cascade(
-        &mut self,
-        until_time_us: u64,
-        tissue: Option<&super::TissueField>,
-    ) -> u64 {
+    fn run_cascade(&mut self, until_time_us: u64, tissue: Option<&super::TissueField>) -> u64 {
         let mut spikes_this_run = 0u64;
         let mut events_this_run = 0u64;
 
@@ -353,8 +347,7 @@ impl SpatialCascade {
             let source_idx = arrival.source as usize;
             // Boost trace on the source neuron for STDP-like learning
             if source_idx < self.neurons.len() && source_idx != idx {
-                self.neurons[source_idx].trace =
-                    self.neurons[source_idx].trace.saturating_add(5);
+                self.neurons[source_idx].trace = self.neurons[source_idx].trace.saturating_add(5);
             }
         }
 
@@ -423,8 +416,8 @@ impl SpatialCascade {
 
                 // High resistance × distance → weaker signal
                 // attenuation = 1 / (1 + k * R * distance)
-                let attenuation = 1.0
-                    / (1.0 + self.config.tissue_attenuation_factor * avg_r * distance);
+                let attenuation =
+                    1.0 / (1.0 + self.config.tissue_attenuation_factor * avg_r * distance);
                 current = (current as f32 * attenuation) as i16;
             }
 
@@ -707,8 +700,14 @@ mod tests {
 
         // The myelinated target should have received its spike earlier.
         // last_arrival_us records when the spike arrived.
-        assert!(target_myel.last_arrival_us > 0, "myelinated target should receive spike");
-        assert!(target_unmyel.last_arrival_us > 0, "unmyelinated target should receive spike");
+        assert!(
+            target_myel.last_arrival_us > 0,
+            "myelinated target should receive spike"
+        );
+        assert!(
+            target_unmyel.last_arrival_us > 0,
+            "unmyelinated target should receive spike"
+        );
         assert!(
             target_myel.last_arrival_us < target_unmyel.last_arrival_us,
             "myelinated spike (arrived {}μs) should arrive before unmyelinated (arrived {}μs)",

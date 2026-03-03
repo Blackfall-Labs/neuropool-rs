@@ -90,7 +90,11 @@ impl NeuronPool {
         if reinforced > 0 || weakened > 0 {
             log::debug!(
                 "[PLASTICITY] {}: +{} reinforced, -{} weakened (DA={}, Cort={})",
-                self.name, reinforced, weakened, da, cortisol
+                self.name,
+                reinforced,
+                weakened,
+                da,
+                cortisol
             );
         }
 
@@ -124,7 +128,9 @@ impl NeuronPool {
         // Simple LCG for weight/delay randomization
         let mut rng_state: u64 = self.tick_count.wrapping_mul(0xBEEF) ^ 0xCAFE;
         let lcg_next = |state: &mut u64| -> u32 {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (*state >> 33) as u32
         };
 
@@ -153,8 +159,12 @@ impl NeuronPool {
             };
 
             for &tgt in &active_neurons {
-                if src == tgt { continue; }
-                if created >= max_new_per_tick as usize { break; }
+                if src == tgt {
+                    continue;
+                }
+                if created >= max_new_per_tick as usize {
+                    break;
+                }
 
                 // Distance filter for spatial pools
                 if max_synaptogenesis_d_sq < u32::MAX {
@@ -165,7 +175,9 @@ impl NeuronPool {
                 }
 
                 // Check if connection already exists
-                let already_connected = self.synapses.outgoing(src)
+                let already_connected = self
+                    .synapses
+                    .outgoing(src)
                     .iter()
                     .any(|s| s.target == tgt as u16);
 
@@ -175,12 +187,16 @@ impl NeuronPool {
 
                 // Create new HOT synapse with small weight
                 let magnitude = (lcg_next(&mut rng_state) % 20 + 5) as u8; // 5-24
-                // Distance-proportional delay for spatial pools
+                                                                           // Distance-proportional delay for spatial pools
                 let delay = if self.dims.h > 1 || self.dims.d > 1 {
                     let d_sq = self.dims.distance_sq(src, tgt);
                     let max_d_sq = self.dims.max_distance_sq();
                     let sqrt_max = (max_d_sq as f32).sqrt();
-                    let ratio = if sqrt_max > 0.0 { (d_sq as f32).sqrt() / sqrt_max } else { 0.0 };
+                    let ratio = if sqrt_max > 0.0 {
+                        (d_sq as f32).sqrt() / sqrt_max
+                    } else {
+                        0.0
+                    };
                     let d = 1 + (ratio * (self.config.max_delay - 1) as f32) as u8;
                     d.min(self.config.max_delay).max(1)
                 } else {
@@ -196,7 +212,10 @@ impl NeuronPool {
         if created > 0 {
             log::debug!(
                 "[SYNAPTOGENESIS] {}: created {} new synapses (ACh={}, active_neurons={})",
-                self.name, created, ach, active_neurons.len()
+                self.name,
+                created,
+                ach,
+                active_neurons.len()
             );
         }
 
@@ -227,7 +246,7 @@ impl NeuronPool {
     ///
     /// Returns the number of neurons that changed type.
     pub fn type_plasticity(&mut self, da: u8, seed: u64) -> u32 {
-        use crate::neuron::{NeuronType, NeuronProfile, flags};
+        use crate::neuron::{flags, NeuronProfile, NeuronType};
 
         // DA must be above threshold for plasticity to be active
         if da < 150 {
@@ -248,17 +267,25 @@ impl NeuronPool {
         // Simple LCG for tie-breaking
         let mut rng = seed;
         let lcg = |s: &mut u64| -> u64 {
-            *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            *s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *s >> 33
         };
 
         for i in 0..n {
-            if mutations >= max_mutations as u32 { break; }
+            if mutations >= max_mutations as u32 {
+                break;
+            }
 
             let f = self.neurons.flags[i];
             // Only mutate Computational excitatory neurons
-            if flags::is_inhibitory(f) { continue; }
-            if flags::neuron_type(f) != NeuronType::Computational { continue; }
+            if flags::is_inhibitory(f) {
+                continue;
+            }
+            if flags::neuron_type(f) != NeuronType::Computational {
+                continue;
+            }
 
             let profile = NeuronProfile::from_flags(f);
 
@@ -274,7 +301,8 @@ impl NeuronPool {
             if self.spike_rate[i] >= 8 && self.spike_rate[i] <= 25 {
                 // Additional randomness: only ~25% of eligible neurons actually transition
                 if lcg(&mut rng) % 4 == 0 {
-                    self.neurons.flags[i] = flags::encode_full(false, profile, NeuronType::Oscillator);
+                    self.neurons.flags[i] =
+                        flags::encode_full(false, profile, NeuronType::Oscillator);
                     mutations += 1;
                 }
             }
@@ -283,7 +311,9 @@ impl NeuronPool {
         if mutations > 0 {
             log::info!(
                 "[TYPE_PLASTICITY] {}: {} neurons mutated type (DA={})",
-                self.name, mutations, da
+                self.name,
+                mutations,
+                da
             );
         }
 
@@ -297,7 +327,14 @@ impl NeuronPool {
     /// Dead neurons (zero spikes since last reset) are pruned first.
     ///
     /// Resets spike_counts after making the decision.
-    pub fn growth_cycle(&mut self, da: u8, ach: u8, ne: u8, cortisol: u8, seed: u64) -> GrowthResult {
+    pub fn growth_cycle(
+        &mut self,
+        da: u8,
+        ach: u8,
+        ne: u8,
+        cortisol: u8,
+        seed: u64,
+    ) -> GrowthResult {
         // Copy config values to avoid borrow-checker conflict with &mut self calls
         let max_neurons = self.config.growth.max_neurons;
         let min_neurons = self.config.growth.min_neurons;
@@ -325,7 +362,9 @@ impl NeuronPool {
         // Prune if signal exceeds threshold and above minimum
         if prune_signal > prune_threshold && self.n_neurons > min_neurons {
             // Identify dead neurons (zero spikes)
-            let mut dead: Vec<u32> = self.spike_counts.iter()
+            let mut dead: Vec<u32> = self
+                .spike_counts
+                .iter()
                 .enumerate()
                 .filter(|(_, &c)| c == 0)
                 .map(|(i, _)| i as u32)
@@ -405,7 +444,10 @@ mod tests {
         }
 
         // Count synapses with nonzero eligibility before
-        let eligible_count = pool.synapses.synapses.iter()
+        let eligible_count = pool
+            .synapses
+            .synapses
+            .iter()
             .filter(|s| s.eligibility != 0)
             .count();
 
@@ -413,7 +455,10 @@ mod tests {
         let (reinforced, weakened) = pool.apply_modulation(200, 30, 100);
 
         if eligible_count > 0 {
-            assert!(reinforced + weakened > 0, "DA should affect eligible synapses");
+            assert!(
+                reinforced + weakened > 0,
+                "DA should affect eligible synapses"
+            );
         }
     }
 
@@ -430,13 +475,19 @@ mod tests {
         // High cortisol = punishment signal
         let (reinforced, weakened) = pool.apply_modulation(128, 80, 100);
 
-        let eligible_count = pool.synapses.synapses.iter()
+        let eligible_count = pool
+            .synapses
+            .synapses
+            .iter()
             .filter(|s| s.eligibility != 0)
             .count();
 
         // Cortisol should cause weakening of eligible synapses
         if eligible_count > 0 {
-            assert!(reinforced + weakened > 0, "Cortisol should affect eligible synapses");
+            assert!(
+                reinforced + weakened > 0,
+                "Cortisol should affect eligible synapses"
+            );
         }
     }
 
@@ -453,7 +504,10 @@ mod tests {
 
         // High ACh = gate synaptogenesis
         let created = pool.synaptogenesis(200);
-        assert!(created > 0, "ACh should create new synapses between co-active neurons");
+        assert!(
+            created > 0,
+            "ACh should create new synapses between co-active neurons"
+        );
     }
 
     #[test]
@@ -548,7 +602,11 @@ mod tests {
 
         // High cortisol + many silent neurons should trigger pruning
         let result = pool.growth_cycle(128, 128, 128, 200, 42);
-        assert!(result.neurons_pruned > 0, "should prune dead neurons: got {}", result.neurons_pruned);
+        assert!(
+            result.neurons_pruned > 0,
+            "should prune dead neurons: got {}",
+            result.neurons_pruned
+        );
         assert!(result.new_size < 32);
     }
 
@@ -574,10 +632,11 @@ mod tests {
 
     #[test]
     fn type_seeding_respects_percentages() {
-        use crate::neuron::{NeuronType, flags};
+        use crate::neuron::{flags, NeuronType};
         use crate::pool::TypeDistributionSpec;
 
-        let mut pool = NeuronPool::with_random_connectivity_seeded("test", 100, 0.02, Default::default(), 42);
+        let mut pool =
+            NeuronPool::with_random_connectivity_seeded("test", 100, 0.02, Default::default(), 42);
 
         let spec = TypeDistributionSpec {
             gate_pct: 20,
@@ -601,7 +660,11 @@ mod tests {
 
         // ~20% of excitatory non-boundary neurons should be Gate
         assert!(n_gate >= 10, "expected >= 10 Gate neurons, got {}", n_gate);
-        assert!(n_osc >= 5, "expected >= 5 Oscillator neurons, got {}", n_osc);
+        assert!(
+            n_osc >= 5,
+            "expected >= 5 Oscillator neurons, got {}",
+            n_osc
+        );
 
         // Inhibitory neurons should NOT be reassigned
         for i in 0..pool.n_neurons as usize {
@@ -609,7 +672,8 @@ mod tests {
                 assert_eq!(
                     flags::neuron_type(pool.neurons.flags[i]),
                     NeuronType::Computational,
-                    "inhibitory neuron {} should remain Computational", i
+                    "inhibitory neuron {} should remain Computational",
+                    i
                 );
             }
         }
@@ -621,7 +685,7 @@ mod tests {
 
     #[test]
     fn type_mutation_computational_to_gate() {
-        use crate::neuron::{NeuronType, flags};
+        use crate::neuron::{flags, NeuronType};
 
         let mut pool = NeuronPool::new("test", 64, PoolConfig::default());
 
@@ -640,12 +704,15 @@ mod tests {
             })
             .count();
 
-        assert!(n_gate > 0, "sustained DA exposure should mutate some neurons to Gate, got 0");
+        assert!(
+            n_gate > 0,
+            "sustained DA exposure should mutate some neurons to Gate, got 0"
+        );
     }
 
     #[test]
     fn type_mutation_no_change_without_da() {
-        use crate::neuron::{NeuronType, flags};
+        use crate::neuron::{flags, NeuronType};
 
         let mut pool = NeuronPool::new("test", 64, PoolConfig::default());
 

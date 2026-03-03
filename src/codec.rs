@@ -143,7 +143,7 @@ fn deserialize_config(r: &mut &[u8]) -> io::Result<PoolConfig> {
         stdp_positive: read_i8(r)?,
         stdp_negative: read_i8(r)?,
         max_delay: read_u8(r)?,
-        threshold_jitter: 512,   // Runtime config, not persisted — use defaults
+        threshold_jitter: 512, // Runtime config, not persisted — use defaults
         spontaneous_rate: 5,
         growth: crate::pool::GrowthConfig::default(),
         evolution: crate::pool::EvolutionConfig::default(),
@@ -151,13 +151,27 @@ fn deserialize_config(r: &mut &[u8]) -> io::Result<PoolConfig> {
 }
 
 fn serialize_neurons(w: &mut Vec<u8>, neurons: &NeuronArrays, n: usize) {
-    for i in 0..n { write_i16(w, neurons.membrane[i]); }
-    for i in 0..n { write_i16(w, neurons.threshold[i]); }
-    for i in 0..n { write_u8(w, neurons.leak[i]); }
-    for i in 0..n { write_u8(w, neurons.refract_remaining[i]); }
-    for i in 0..n { write_u8(w, neurons.flags[i]); }
-    for i in 0..n { write_i8(w, neurons.trace[i]); }
-    for i in 0..n { write_u8(w, if neurons.spike_out[i] { 1 } else { 0 }); }
+    for i in 0..n {
+        write_i16(w, neurons.membrane[i]);
+    }
+    for i in 0..n {
+        write_i16(w, neurons.threshold[i]);
+    }
+    for i in 0..n {
+        write_u8(w, neurons.leak[i]);
+    }
+    for i in 0..n {
+        write_u8(w, neurons.refract_remaining[i]);
+    }
+    for i in 0..n {
+        write_u8(w, neurons.flags[i]);
+    }
+    for i in 0..n {
+        write_i8(w, neurons.trace[i]);
+    }
+    for i in 0..n {
+        write_u8(w, if neurons.spike_out[i] { 1 } else { 0 });
+    }
 }
 
 fn deserialize_neurons(r: &mut &[u8], n: usize) -> io::Result<NeuronArrays> {
@@ -169,13 +183,27 @@ fn deserialize_neurons(r: &mut &[u8], n: usize) -> io::Result<NeuronArrays> {
     let mut trace = vec![0i8; n];
     let mut spike_out = vec![false; n];
 
-    for i in 0..n { membrane[i] = read_i16(r)?; }
-    for i in 0..n { threshold[i] = read_i16(r)?; }
-    for i in 0..n { leak[i] = read_u8(r)?; }
-    for i in 0..n { refract_remaining[i] = read_u8(r)?; }
-    for i in 0..n { flags[i] = read_u8(r)?; }
-    for i in 0..n { trace[i] = read_i8(r)?; }
-    for i in 0..n { spike_out[i] = read_u8(r)? != 0; }
+    for i in 0..n {
+        membrane[i] = read_i16(r)?;
+    }
+    for i in 0..n {
+        threshold[i] = read_i16(r)?;
+    }
+    for i in 0..n {
+        leak[i] = read_u8(r)?;
+    }
+    for i in 0..n {
+        refract_remaining[i] = read_u8(r)?;
+    }
+    for i in 0..n {
+        flags[i] = read_u8(r)?;
+    }
+    for i in 0..n {
+        trace[i] = read_i8(r)?;
+    }
+    for i in 0..n {
+        spike_out[i] = read_u8(r)? != 0;
+    }
 
     Ok(NeuronArrays {
         membrane,
@@ -313,8 +341,10 @@ impl NeuronPool {
             ));
         }
         let _flags = u16::from_le_bytes([file_data[6], file_data[7]]);
-        let n_neurons_header = u32::from_le_bytes([file_data[8], file_data[9], file_data[10], file_data[11]]);
-        let expected_crc = u32::from_le_bytes([file_data[12], file_data[13], file_data[14], file_data[15]]);
+        let n_neurons_header =
+            u32::from_le_bytes([file_data[8], file_data[9], file_data[10], file_data[11]]);
+        let expected_crc =
+            u32::from_le_bytes([file_data[12], file_data[13], file_data[14], file_data[15]]);
 
         let body = &file_data[16..];
         let actual_crc = crc32(body);
@@ -373,7 +403,10 @@ impl NeuronPool {
             (dims, bindings)
         } else {
             // v1 backward compat: flat dims, no bindings
-            (super::pool::SpatialDims::flat(n_neurons), crate::binding::BindingTable::new())
+            (
+                super::pool::SpatialDims::flat(n_neurons),
+                crate::binding::BindingTable::new(),
+            )
         };
 
         // v3 additions: spike_counts, initial_neuron_count
@@ -439,14 +472,18 @@ mod tests {
         assert_eq!(loaded.n_inhibitory, pool.n_inhibitory);
         assert_eq!(loaded.tick_count, 0);
         assert_eq!(loaded.synapse_count(), 0);
-        assert_eq!(loaded.config.resting_potential, pool.config.resting_potential);
+        assert_eq!(
+            loaded.config.resting_potential,
+            pool.config.resting_potential
+        );
 
         std::fs::remove_file(&path).ok();
     }
 
     #[test]
     fn round_trip_with_connectivity() {
-        let mut pool = NeuronPool::with_random_connectivity("connected", 50, 0.05, PoolConfig::default());
+        let mut pool =
+            NeuronPool::with_random_connectivity("connected", 50, 0.05, PoolConfig::default());
 
         // Run some ticks to create state
         for _ in 0..10 {
@@ -471,9 +508,18 @@ mod tests {
 
         // Verify synapse state preserved
         for i in 0..pool.synapse_count() {
-            assert_eq!(loaded.synapses.synapses[i].target, pool.synapses.synapses[i].target);
-            assert_eq!(loaded.synapses.synapses[i].weight, pool.synapses.synapses[i].weight);
-            assert_eq!(loaded.synapses.synapses[i].maturity, pool.synapses.synapses[i].maturity);
+            assert_eq!(
+                loaded.synapses.synapses[i].target,
+                pool.synapses.synapses[i].target
+            );
+            assert_eq!(
+                loaded.synapses.synapses[i].weight,
+                pool.synapses.synapses[i].weight
+            );
+            assert_eq!(
+                loaded.synapses.synapses[i].maturity,
+                pool.synapses.synapses[i].maturity
+            );
         }
 
         std::fs::remove_file(&path).ok();

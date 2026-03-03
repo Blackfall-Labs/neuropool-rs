@@ -351,7 +351,8 @@ impl CascadePool {
 
     /// Update density field from current neuron positions.
     pub fn update_density(&mut self) {
-        self.density.update_from_positions(&self.neurons.soma_position);
+        self.density
+            .update_from_positions(&self.neurons.soma_position);
     }
 
     /// Migrate a neuron toward correlated partners, away from competitors.
@@ -432,7 +433,13 @@ mod tests {
         let neurons = NeuronArrays::new(3, 3, -17920, -14080);
         let synapses = SynapseStore::empty(3);
 
-        CascadePool::new("test", neurons, synapses, [10.0, 10.0, 10.0], CascadeConfig::default())
+        CascadePool::new(
+            "test",
+            neurons,
+            synapses,
+            [10.0, 10.0, 10.0],
+            CascadeConfig::default(),
+        )
     }
 
     #[test]
@@ -467,13 +474,18 @@ mod tests {
         neurons.axon_terminal[0] = [0.5, 0.0, 0.0];
         neurons.axon_terminal[1] = [1.0, 0.0, 0.0];
 
-        let exc_flags = crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
-        let edges = vec![
-            (0, Synapse::new(1, 100, 1, exc_flags)),
-        ];
+        let exc_flags =
+            crate::neuron::flags::encode(false, crate::neuron::NeuronProfile::RegularSpiking);
+        let edges = vec![(0, Synapse::new(1, 100, 1, exc_flags))];
         let synapses = SynapseStore::from_edges(2, edges);
 
-        let mut pool = CascadePool::new("test", neurons, synapses, [10.0, 10.0, 10.0], CascadeConfig::default());
+        let mut pool = CascadePool::new(
+            "test",
+            neurons,
+            synapses,
+            [10.0, 10.0, 10.0],
+            CascadeConfig::default(),
+        );
 
         // Inject enough current to make neuron 0 spike
         pool.inject(0, 5000, 0);
@@ -487,8 +499,18 @@ mod tests {
 
     #[test]
     fn test_spike_arrival_ordering() {
-        let a1 = SpikeArrival { target: 0, current: 100, arrival_time: 50, source: 1 };
-        let a2 = SpikeArrival { target: 1, current: 100, arrival_time: 100, source: 1 };
+        let a1 = SpikeArrival {
+            target: 0,
+            current: 100,
+            arrival_time: 50,
+            source: 1,
+        };
+        let a2 = SpikeArrival {
+            target: 1,
+            current: 100,
+            arrival_time: 100,
+            source: 1,
+        };
 
         // Earlier time should be "greater" for min-heap
         assert!(a1 > a2);

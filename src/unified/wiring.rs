@@ -125,7 +125,9 @@ pub fn wire_by_proximity(
             .into_iter()
             .filter(|&j| j != i as u32)
             .filter_map(|j| {
-                let dist_sq = neurons[i].position.distance_sq(&neurons[j as usize].position);
+                let dist_sq = neurons[i]
+                    .position
+                    .distance_sq(&neurons[j as usize].position);
                 if dist_sq <= config.max_distance_sq {
                     Some((j, dist_sq))
                 } else {
@@ -158,13 +160,7 @@ pub fn wire_by_proximity(
                     0, // delay computed from distance at runtime
                 )
             } else {
-                UnifiedSynapse::excitatory(
-                    i as u32,
-                    j,
-                    zone,
-                    config.default_magnitude,
-                    0,
-                )
+                UnifiedSynapse::excitatory(i as u32, j, zone, config.default_magnitude, 0)
             };
 
             store.add(syn);
@@ -297,7 +293,10 @@ mod tests {
         let config = UnifiedWiringConfig::default();
 
         let store = wire_by_proximity(&neurons, &grid, &config);
-        let inh_idx = neurons.iter().position(|n| n.nuclei.is_inhibitory()).unwrap();
+        let inh_idx = neurons
+            .iter()
+            .position(|n| n.nuclei.is_inhibitory())
+            .unwrap();
         let out = store.outgoing(inh_idx as u32);
         assert_eq!(out.len(), 1);
         assert!(out[0].is_inhibitory());
@@ -321,18 +320,32 @@ mod tests {
         let store = wire_by_proximity(&neurons, &grid, &config);
 
         // Find the neuron at z=0 (after sort)
-        let z0_idx = neurons.iter().position(|n| n.position.voxel.2 == 0).unwrap();
-        let z1_idx = neurons.iter().position(|n| n.position.voxel.2 == 1).unwrap();
+        let z0_idx = neurons
+            .iter()
+            .position(|n| n.position.voxel.2 == 0)
+            .unwrap();
+        let z1_idx = neurons
+            .iter()
+            .position(|n| n.position.voxel.2 == 1)
+            .unwrap();
 
         let out = store.outgoing(z0_idx as u32);
         if !out.is_empty() {
-            assert_eq!(out[0].zone, DendriticZone::Feedforward, "z=0 → z=1 should be feedforward");
+            assert_eq!(
+                out[0].zone,
+                DendriticZone::Feedforward,
+                "z=0 → z=1 should be feedforward"
+            );
         }
 
         // z=1 → z=0 should be Feedback
         let out_fb = store.outgoing(z1_idx as u32);
         if !out_fb.is_empty() {
-            assert_eq!(out_fb[0].zone, DendriticZone::Feedback, "z=1 → z=0 should be feedback");
+            assert_eq!(
+                out_fb[0].zone,
+                DendriticZone::Feedback,
+                "z=1 → z=0 should be feedback"
+            );
         }
     }
 
@@ -354,7 +367,11 @@ mod tests {
         // Same z → Context
         let out = store.outgoing(0);
         if !out.is_empty() {
-            assert_eq!(out[0].zone, DendriticZone::Context, "same z should be context");
+            assert_eq!(
+                out[0].zone,
+                DendriticZone::Context,
+                "same z should be context"
+            );
         }
     }
 
@@ -382,9 +399,17 @@ mod tests {
                 let src_voxel = neurons[i].position.voxel;
                 let tgt_voxel = neurons[syn.target as usize].position.voxel;
                 if src_voxel == tgt_voxel {
-                    assert_eq!(syn.zone, DendriticZone::Context, "same voxel should be context");
+                    assert_eq!(
+                        syn.zone,
+                        DendriticZone::Context,
+                        "same voxel should be context"
+                    );
                 } else {
-                    assert_eq!(syn.zone, DendriticZone::Feedforward, "different voxel should be feedforward");
+                    assert_eq!(
+                        syn.zone,
+                        DendriticZone::Feedforward,
+                        "different voxel should be feedforward"
+                    );
                 }
             }
         }
@@ -396,10 +421,7 @@ mod tests {
         source.axon = Axon::default();
         source.axon.health = 0; // dead
 
-        let mut neurons = vec![
-            source,
-            UnifiedNeuron::pyramidal_at(pos(0, 0, 0)),
-        ];
+        let mut neurons = vec![source, UnifiedNeuron::pyramidal_at(pos(0, 0, 0))];
 
         let grid = VoxelGrid::build(&mut neurons);
         let config = UnifiedWiringConfig::default();

@@ -49,10 +49,7 @@ impl Default for WiringConfig {
 /// Respects fanout/fanin caps. Motor neurons are skipped as sources.
 ///
 /// Returns a fully indexed `SpatialSynapseStore`.
-pub fn wire_by_proximity(
-    neurons: &[SpatialNeuron],
-    config: &WiringConfig,
-) -> SpatialSynapseStore {
+pub fn wire_by_proximity(neurons: &[SpatialNeuron], config: &WiringConfig) -> SpatialSynapseStore {
     let n = neurons.len();
     let mut store = SpatialSynapseStore::new(n);
     let mut fanout = vec![0u16; n];
@@ -107,12 +104,7 @@ pub fn wire_by_proximity(
                     0, // delay computed from spatial distance at runtime
                 )
             } else {
-                SpatialSynapse::excitatory(
-                    i as u32,
-                    j as u32,
-                    config.default_magnitude,
-                    0,
-                )
+                SpatialSynapse::excitatory(i as u32, j as u32, config.default_magnitude, 0)
             };
 
             store.add(syn);
@@ -253,7 +245,11 @@ mod tests {
                     .count()
             })
             .sum();
-        assert!(incoming <= 3, "fanin should be capped at 3, got {}", incoming);
+        assert!(
+            incoming <= 3,
+            "fanin should be capped at 3, got {}",
+            incoming
+        );
     }
 
     #[test]

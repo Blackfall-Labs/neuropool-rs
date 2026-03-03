@@ -398,10 +398,7 @@ mod tests {
         let mut field = DensityField::new([2, 2, 2], [2.0, 2.0, 2.0]);
 
         // Place two neurons in the same voxel
-        let positions = vec![
-            [0.25, 0.25, 0.25],
-            [0.75, 0.75, 0.75],
-        ];
+        let positions = vec![[0.25, 0.25, 0.25], [0.75, 0.75, 0.75]];
         field.update_from_positions(&positions);
 
         // Voxel (0,0,0) should have density > 0
@@ -413,10 +410,7 @@ mod tests {
         let mut field = DensityField::new([2, 2, 2], [2.0, 2.0, 2.0]);
 
         // Place neurons in one corner only
-        let positions = vec![
-            [0.25, 0.25, 0.25],
-            [0.5, 0.5, 0.5],
-        ];
+        let positions = vec![[0.25, 0.25, 0.25], [0.5, 0.5, 0.5]];
         field.update_from_positions(&positions);
 
         // Should find a low-density position in the other half

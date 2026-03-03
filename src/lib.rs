@@ -27,30 +27,63 @@
 //! The spatial execution engine (`SpatialRuntime`) is deprecated.
 
 // === Voxel System (Deprecated — use unified:: instead) ===
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified or neuropool::pool directly. Voxel binding system superseded by unified::CascadeEngine with UnifiedNeuronIO.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified or neuropool::pool directly. Voxel binding system superseded by unified::CascadeEngine with UnifiedNeuronIO."
+)]
 pub mod binding;
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified::CascadeEngine instead.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified::CascadeEngine instead."
+)]
 pub mod cascade;
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified::persist (UnifiedPool::save/load) instead.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified::persist (UnifiedPool::save/load) instead."
+)]
 pub mod codec;
-#[deprecated(since = "2.0.0", note = "Density field superseded by unified voxel grid.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Density field superseded by unified voxel grid."
+)]
 pub mod density;
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified::UnifiedNeuronIO instead.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified::UnifiedNeuronIO instead."
+)]
 pub mod io;
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified::UnifiedNeuron instead.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified::UnifiedNeuron instead."
+)]
 pub mod neuron;
-#[deprecated(since = "2.0.0", note = "Plasticity integrated into unified cascade engine.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Plasticity integrated into unified cascade engine."
+)]
 pub mod plasticity;
 pub mod pool;
-#[deprecated(since = "2.0.0", note = "Pool stats superseded by CascadeEngine counters.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Pool stats superseded by CascadeEngine counters."
+)]
 pub mod stats;
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified::UnifiedSynapse instead.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified::UnifiedSynapse instead."
+)]
 pub mod synapse;
-#[deprecated(since = "2.0.0", note = "Use neuropool::unified::ImaginalDisc instead.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Use neuropool::unified::ImaginalDisc instead."
+)]
 pub mod template;
 
 // === Spatial System (Deprecated — anatomy types reused by unified) ===
-#[deprecated(since = "2.0.0", note = "Anatomy types (Nuclei, Dendrite, Axon, Interface) reused by unified system. SpatialRuntime superseded by CascadeEngine.")]
+#[deprecated(
+    since = "2.0.0",
+    note = "Anatomy types (Nuclei, Dendrite, Axon, Interface) reused by unified system. SpatialRuntime superseded by CascadeEngine."
+)]
 pub mod spatial;
 
 // === Unified System (Current) ===
@@ -69,21 +102,27 @@ pub use io::{NeuronIO, NullIO};
 pub use neuron::{NeuronArrays, NeuronProfile, NeuronType};
 #[allow(deprecated)]
 pub use plasticity::GrowthResult;
-pub use pool::{BindingSpec, EvolutionConfig, EvolutionResult, FitnessInput, GrowthConfig, MutationEntry, MutationJournal, MutationType, NeuronPool, PoolCheckpoint, PoolConfig, SpatialDims, TypeDistributionSpec};
+pub use pool::{
+    BindingSpec, EvolutionConfig, EvolutionResult, FitnessInput, GrowthConfig, MutationEntry,
+    MutationJournal, MutationType, NeuronPool, PoolCheckpoint, PoolConfig, SpatialDims,
+    TypeDistributionSpec,
+};
 #[allow(deprecated)]
 pub use stats::{PoolStats, ThermalDistribution, TypeDistribution};
 #[allow(deprecated)]
 pub use synapse::{Synapse, SynapseStore, ThermalState};
 #[allow(deprecated)]
-pub use template::{SignalType, TemplateType, TemplateRequest, TemplateInstance, TemplateRegistry, SpatialArrangement};
+pub use template::{
+    SignalType, SpatialArrangement, TemplateInstance, TemplateRegistry, TemplateRequest,
+    TemplateType,
+};
 
 // === Spatial Re-exports (deprecated) ===
 #[allow(deprecated)]
 pub use spatial::{
-    Axon, Dendrite, EnergyGates, Interface, InterfaceAction,
-    MasteryConfig, MasteryState, Nuclei, PolarityChange,
-    Polarity, Signal, SpatialNeuron, SpatialSynapse, Soma,
-    SpatialRuntime, SpatialRuntimeConfig, WiringConfig, wire_by_proximity,
+    wire_by_proximity, Axon, Dendrite, EnergyGates, Interface, InterfaceAction, MasteryConfig,
+    MasteryState, Nuclei, Polarity, PolarityChange, Signal, Soma, SpatialNeuron, SpatialRuntime,
+    SpatialRuntimeConfig, SpatialSynapse, WiringConfig,
 };
 
 // === Unified Re-exports (current) ===
@@ -93,12 +132,8 @@ pub use spatial::{
 // and unified::wire_by_proximity are accessed via `unified::` prefix to avoid
 // name conflicts with the spatial system's wire_by_proximity and WiringConfig.
 pub use unified::{
-    DendriticZone, ZoneWeights,
-    UnifiedNeuron, VoxelPosition,
-    UnifiedSynapse, UnifiedSynapseStore,
-    CascadeEngine, TernsigTrigger,
-    VoxelGrid, VoxelNeighborhood, GridDims,
-    ImaginalDisc, RegionArchetype, NucleiDistribution, WiringRules, ZoneBias,
-    IncubatedPool, IncubateConfig,
-    UnifiedNeuronIO, NullUnifiedIO, UnifiedPool,
+    CascadeEngine, DendriticZone, GridDims, ImaginalDisc, IncubateConfig, IncubatedPool,
+    NucleiDistribution, NullUnifiedIO, RegionArchetype, TernsigTrigger, UnifiedNeuron,
+    UnifiedNeuronIO, UnifiedPool, UnifiedSynapse, UnifiedSynapseStore, VoxelGrid,
+    VoxelNeighborhood, VoxelPosition, WiringRules, ZoneBias, ZoneWeights,
 };

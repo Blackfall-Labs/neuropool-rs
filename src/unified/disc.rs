@@ -149,9 +149,21 @@ impl WiringRules {
                 max_fanout: 8,
                 max_fanin: 20,
                 zone_biases: [
-                    ZoneBias { zone: DendriticZone::Feedforward, probability: 150, magnitude: 120 },
-                    ZoneBias { zone: DendriticZone::Context, probability: 80, magnitude: 80 },
-                    ZoneBias { zone: DendriticZone::Feedback, probability: 40, magnitude: 60 },
+                    ZoneBias {
+                        zone: DendriticZone::Feedforward,
+                        probability: 150,
+                        magnitude: 120,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Context,
+                        probability: 80,
+                        magnitude: 80,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Feedback,
+                        probability: 40,
+                        magnitude: 60,
+                    },
                 ],
                 dense_lateral: false,
                 oscillator_period_range: (8_000, 20_000), // 50-125 Hz (gamma/beta)
@@ -161,9 +173,21 @@ impl WiringRules {
                 max_fanout: 12,
                 max_fanin: 16,
                 zone_biases: [
-                    ZoneBias { zone: DendriticZone::Feedforward, probability: 120, magnitude: 140 },
-                    ZoneBias { zone: DendriticZone::Context, probability: 60, magnitude: 60 },
-                    ZoneBias { zone: DendriticZone::Feedback, probability: 120, magnitude: 100 },
+                    ZoneBias {
+                        zone: DendriticZone::Feedforward,
+                        probability: 120,
+                        magnitude: 140,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Context,
+                        probability: 60,
+                        magnitude: 60,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Feedback,
+                        probability: 120,
+                        magnitude: 100,
+                    },
                 ],
                 dense_lateral: false,
                 oscillator_period_range: (10_000, 25_000), // 40-100 Hz
@@ -173,11 +197,23 @@ impl WiringRules {
                 max_fanout: 10,
                 max_fanin: 25,
                 zone_biases: [
-                    ZoneBias { zone: DendriticZone::Feedforward, probability: 130, magnitude: 100 },
-                    ZoneBias { zone: DendriticZone::Context, probability: 140, magnitude: 120 },
-                    ZoneBias { zone: DendriticZone::Feedback, probability: 60, magnitude: 80 },
+                    ZoneBias {
+                        zone: DendriticZone::Feedforward,
+                        probability: 130,
+                        magnitude: 100,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Context,
+                        probability: 140,
+                        magnitude: 120,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Feedback,
+                        probability: 60,
+                        magnitude: 80,
+                    },
                 ],
-                dense_lateral: true, // CA3 recurrence
+                dense_lateral: true,                         // CA3 recurrence
                 oscillator_period_range: (100_000, 250_000), // 4-10 Hz (theta)
             },
             RegionArchetype::BasalGanglia => Self {
@@ -185,9 +221,21 @@ impl WiringRules {
                 max_fanout: 10,
                 max_fanin: 20,
                 zone_biases: [
-                    ZoneBias { zone: DendriticZone::Feedforward, probability: 160, magnitude: 130 },
-                    ZoneBias { zone: DendriticZone::Context, probability: 40, magnitude: 60 },
-                    ZoneBias { zone: DendriticZone::Feedback, probability: 80, magnitude: 100 },
+                    ZoneBias {
+                        zone: DendriticZone::Feedforward,
+                        probability: 160,
+                        magnitude: 130,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Context,
+                        probability: 40,
+                        magnitude: 60,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Feedback,
+                        probability: 80,
+                        magnitude: 100,
+                    },
                 ],
                 dense_lateral: false,
                 oscillator_period_range: (15_000, 50_000), // 20-67 Hz (beta)
@@ -197,9 +245,21 @@ impl WiringRules {
                 max_fanout: 16,
                 max_fanin: 30,
                 zone_biases: [
-                    ZoneBias { zone: DendriticZone::Feedforward, probability: 140, magnitude: 100 },
-                    ZoneBias { zone: DendriticZone::Context, probability: 100, magnitude: 80 },
-                    ZoneBias { zone: DendriticZone::Feedback, probability: 40, magnitude: 60 },
+                    ZoneBias {
+                        zone: DendriticZone::Feedforward,
+                        probability: 140,
+                        magnitude: 100,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Context,
+                        probability: 100,
+                        magnitude: 80,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Feedback,
+                        probability: 40,
+                        magnitude: 60,
+                    },
                 ],
                 dense_lateral: false,
                 oscillator_period_range: (5_000, 15_000), // 67-200 Hz (fast)
@@ -209,9 +269,21 @@ impl WiringRules {
                 max_fanout: 20,
                 max_fanin: 30,
                 zone_biases: [
-                    ZoneBias { zone: DendriticZone::Feedforward, probability: 100, magnitude: 100 },
-                    ZoneBias { zone: DendriticZone::Context, probability: 100, magnitude: 100 },
-                    ZoneBias { zone: DendriticZone::Feedback, probability: 80, magnitude: 80 },
+                    ZoneBias {
+                        zone: DendriticZone::Feedforward,
+                        probability: 100,
+                        magnitude: 100,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Context,
+                        probability: 100,
+                        magnitude: 100,
+                    },
+                    ZoneBias {
+                        zone: DendriticZone::Feedback,
+                        probability: 80,
+                        magnitude: 80,
+                    },
                 ],
                 dense_lateral: true, // dense interconnection
                 oscillator_period_range: (500_000, 2_000_000), // 0.5-2 Hz (slow)
@@ -241,7 +313,7 @@ impl ImaginalDisc {
     pub fn new(archetype: RegionArchetype, grid_x: u16, grid_y: u16) -> Self {
         let z_layers = match archetype {
             RegionArchetype::Cortical => 5,
-            RegionArchetype::Hippocampal => 4, // DG, CA3, CA1, EC
+            RegionArchetype::Hippocampal => 4,  // DG, CA3, CA1, EC
             RegionArchetype::BasalGanglia => 3, // striatum, GPe/STN, GPi
             _ => 1,
         };
@@ -293,7 +365,11 @@ mod tests {
 
         for arch in &archetypes {
             let dist = NucleiDistribution::for_archetype(*arch);
-            assert!(dist.is_valid(), "{:?} distribution doesn't sum to 100", arch);
+            assert!(
+                dist.is_valid(),
+                "{:?} distribution doesn't sum to 100",
+                arch
+            );
         }
     }
 

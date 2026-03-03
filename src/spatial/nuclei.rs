@@ -117,7 +117,7 @@ impl Nuclei {
             axon_affinity: 40,
             myelin_affinity: 20,
             metabolic_rate: 60,
-            leak: 200, // fast leak = needs coincidence
+            leak: 200,       // fast leak = needs coincidence
             refractory: 500, // fast recovery
             oscillation_period: 0,
             interface: Interface::none(),

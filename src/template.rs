@@ -213,9 +213,10 @@ impl TemplateType {
     /// Total neuron count this template requires.
     pub fn neuron_count(&self) -> usize {
         match self {
-            TemplateType::LateralInhibition { scale, surround_ratio } => {
-                *scale as usize * (1 + *surround_ratio as usize)
-            }
+            TemplateType::LateralInhibition {
+                scale,
+                surround_ratio,
+            } => *scale as usize * (1 + *surround_ratio as usize),
             TemplateType::AttractorMemory { capacity } => *capacity as usize,
             TemplateType::TemporalChain { length } => *length as usize + 1, // +1 for gate
             TemplateType::OscillatorNetwork { follower_count, .. } => {
@@ -235,14 +236,15 @@ impl TemplateType {
     /// Returns (computational, gate, oscillator, memory, sensory, motor).
     pub fn type_distribution(&self) -> (usize, usize, usize, usize, usize, usize) {
         match self {
-            TemplateType::LateralInhibition { scale, surround_ratio } => {
+            TemplateType::LateralInhibition {
+                scale,
+                surround_ratio,
+            } => {
                 let comp = *scale as usize;
                 let gate = *scale as usize * *surround_ratio as usize;
                 (comp, gate, 0, 0, 0, 0)
             }
-            TemplateType::AttractorMemory { capacity } => {
-                (0, 0, 0, *capacity as usize, 0, 0)
-            }
+            TemplateType::AttractorMemory { capacity } => (0, 0, 0, *capacity as usize, 0, 0),
             TemplateType::TemporalChain { length } => {
                 (*length as usize, 1, 0, 0, 0, 0) // chain + 1 gate
             }

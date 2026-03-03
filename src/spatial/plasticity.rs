@@ -24,8 +24,8 @@
 //! - Flips require cooldown period between changes
 
 use super::SpatialSynapse;
-use ternary_signal::Signal;
 use std::collections::HashMap;
+use ternary_signal::Signal;
 
 /// Configuration for mastery learning.
 #[derive(Clone, Copy, Debug)]
@@ -56,8 +56,8 @@ impl Default for MasteryConfig {
             magnitude_cost: 5,
             flip_penalty: 50,
             pressure_scale: 1.0,
-            hub_threshold: 20,      // More than 20 incoming = hub
-            hub_decay_rate: 0.1,    // 10% decay per cycle for hubs
+            hub_threshold: 20,         // More than 20 incoming = hub
+            hub_decay_rate: 0.1,       // 10% decay per cycle for hubs
             flip_cooldown_us: 100_000, // 100ms between flips
         }
     }
@@ -265,7 +265,11 @@ impl MasteryState {
     /// Apply mastery learning to a synapse based on accumulated pressure.
     ///
     /// Returns the change that occurred (if any).
-    pub fn apply_learning(&mut self, synapse_idx: usize, synapse: &mut SpatialSynapse) -> Option<PolarityChange> {
+    pub fn apply_learning(
+        &mut self,
+        synapse_idx: usize,
+        synapse: &mut SpatialSynapse,
+    ) -> Option<PolarityChange> {
         if synapse_idx >= self.pressure.len() {
             return None;
         }
@@ -293,7 +297,8 @@ impl MasteryState {
             synapse.signal.polarity = if desired_positive { 1 } else { -1 };
             synapse.signal.magnitude = synapse.signal.magnitude.saturating_add(10);
             PolarityChange::Awakened
-        } else if (desired_positive && current_positive) || (!desired_positive && current_negative) {
+        } else if (desired_positive && current_positive) || (!desired_positive && current_negative)
+        {
             // Aligned: strengthen
             let cost = self.config.magnitude_cost;
             if !self.try_spend(cost as u32) {
@@ -315,7 +320,11 @@ impl MasteryState {
             } else {
                 // Magnitude depleted: flip polarity (expensive!)
                 // But first check cooldown
-                if !self.flip_cooldown.can_flip(synapse_idx, self.current_time, self.config.flip_cooldown_us) {
+                if !self.flip_cooldown.can_flip(
+                    synapse_idx,
+                    self.current_time,
+                    self.config.flip_cooldown_us,
+                ) {
                     // Can't flip yet — go dormant instead
                     synapse.signal.magnitude = 0;
                     synapse.signal.polarity = 0;
@@ -331,7 +340,8 @@ impl MasteryState {
 
                 synapse.signal.polarity = if desired_positive { 1 } else { -1 };
                 synapse.signal.magnitude = 10;
-                self.flip_cooldown.record_flip(synapse_idx, self.current_time);
+                self.flip_cooldown
+                    .record_flip(synapse_idx, self.current_time);
                 PolarityChange::Flipped
             }
         };

@@ -222,10 +222,18 @@ impl WorldBounds {
         for n in neurons {
             let x = n.soma.position[0];
             let y = n.soma.position[1];
-            if x < x_min { x_min = x; }
-            if x > x_max { x_max = x; }
-            if y < y_min { y_min = y; }
-            if y > y_max { y_max = y; }
+            if x < x_min {
+                x_min = x;
+            }
+            if x > x_max {
+                x_max = x;
+            }
+            if y < y_min {
+                y_min = y;
+            }
+            if y > y_max {
+                y_max = y;
+            }
         }
         // Add margin (10% of range, minimum 1.0)
         let x_margin = ((x_max - x_min) * 0.1).max(1.0);
@@ -358,7 +366,13 @@ impl SnapshotRenderer {
         // Left panel
         self.fill_rect(0, 0, LEFT_PANEL_W, FIELD_H, Palette::PANEL_BG);
         // Right panel
-        self.fill_rect(LEFT_PANEL_W + FIELD_W, 0, RIGHT_PANEL_W, FIELD_H, Palette::PANEL_BG);
+        self.fill_rect(
+            LEFT_PANEL_W + FIELD_W,
+            0,
+            RIGHT_PANEL_W,
+            FIELD_H,
+            Palette::PANEL_BG,
+        );
         // Legend bar
         self.fill_rect(0, FIELD_H, IMG_W, LEGEND_H, Palette::PANEL_BG);
     }
@@ -388,7 +402,12 @@ impl SnapshotRenderer {
         while wy <= b.y_max {
             let (_, py) = self.world_to_px(0.0, wy, b);
             if py > FIELD_PAD && py < FIELD_H - FIELD_PAD {
-                self.draw_hline(LEFT_PANEL_W + FIELD_PAD, py, FIELD_W - 2 * FIELD_PAD, Palette::GRID_LINE);
+                self.draw_hline(
+                    LEFT_PANEL_W + FIELD_PAD,
+                    py,
+                    FIELD_W - 2 * FIELD_PAD,
+                    Palette::GRID_LINE,
+                );
                 let label = format_grid_label(wy);
                 let lx = LEFT_PANEL_W + 4;
                 self.draw_text(lx, py.saturating_sub(3), &label, Palette::TEXT_DIM);
@@ -402,9 +421,17 @@ impl SnapshotRenderer {
             let (px, py) = self.world_to_px(n.soma.position[0], n.soma.position[1], b);
             let fired = n.last_spike_us > 0;
             let (color, radius) = if n.nuclei.is_sensory() {
-                if fired { (Palette::SENSORY_FIRED, 4) } else { (Palette::SENSORY_SILENT, 3) }
+                if fired {
+                    (Palette::SENSORY_FIRED, 4)
+                } else {
+                    (Palette::SENSORY_SILENT, 3)
+                }
             } else if n.nuclei.is_motor() {
-                if fired { (Palette::MOTOR_FIRED, 4) } else { (Palette::MOTOR_SILENT, 3) }
+                if fired {
+                    (Palette::MOTOR_FIRED, 4)
+                } else {
+                    (Palette::MOTOR_SILENT, 3)
+                }
             } else if fired {
                 (Palette::INTER_FIRED, 4)
             } else {
@@ -430,7 +457,12 @@ impl SnapshotRenderer {
         y += step;
         let sim_ms = m.sim_time_us as f64 / 1000.0;
         if sim_ms > 1000.0 {
-            self.draw_text(x + 6, y, &format!("{:.1} s", sim_ms / 1000.0), Palette::TEXT);
+            self.draw_text(
+                x + 6,
+                y,
+                &format!("{:.1} s", sim_ms / 1000.0),
+                Palette::TEXT,
+            );
         } else {
             self.draw_text(x + 6, y, &format!("{:.0} ms", sim_ms), Palette::TEXT);
         }
@@ -440,26 +472,56 @@ impl SnapshotRenderer {
         self.draw_text(x, y, "Wall Clock", Palette::TEXT_DIM);
         y += step;
         if m.wall_clock_ms > 1000.0 {
-            self.draw_text(x + 6, y, &format!("{:.1} s", m.wall_clock_ms / 1000.0), Palette::TEXT);
+            self.draw_text(
+                x + 6,
+                y,
+                &format!("{:.1} s", m.wall_clock_ms / 1000.0),
+                Palette::TEXT,
+            );
         } else {
-            self.draw_text(x + 6, y, &format!("{:.0} ms", m.wall_clock_ms), Palette::TEXT);
+            self.draw_text(
+                x + 6,
+                y,
+                &format!("{:.0} ms", m.wall_clock_ms),
+                Palette::TEXT,
+            );
         }
         y += step + 4;
 
         // Network
         self.draw_text(x, y, "Network", Palette::TEXT_DIM);
         y += step;
-        self.draw_text(x + 6, y, &format!("{} neurons", m.neuron_count), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("{} neurons", m.neuron_count),
+            Palette::TEXT,
+        );
         y += step;
-        self.draw_text(x + 6, y, &format!("{} synapses", m.synapse_count), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("{} synapses", m.synapse_count),
+            Palette::TEXT,
+        );
         y += step + 4;
 
         // Activity
         self.draw_text(x, y, "Activity", Palette::TEXT_DIM);
         y += step;
-        self.draw_text(x + 6, y, &format_count(m.total_spikes, "spikes"), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format_count(m.total_spikes, "spikes"),
+            Palette::TEXT,
+        );
         y += step;
-        self.draw_text(x + 6, y, &format_count(m.total_events, "events"), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format_count(m.total_events, "events"),
+            Palette::TEXT,
+        );
     }
 
     fn draw_right_panel(&mut self, m: &SnapshotMetrics) {
@@ -494,21 +556,51 @@ impl SnapshotRenderer {
         // Learning
         self.draw_text(x, y, "Learning", Palette::TEXT_DIM);
         y += step;
-        self.draw_text(x + 6, y, &format!("{} cycles", m.learning_cycles), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("{} cycles", m.learning_cycles),
+            Palette::TEXT,
+        );
         y += step;
-        self.draw_text(x + 6, y, &format!("+{} strengthen", m.total_strengthened), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("+{} strengthen", m.total_strengthened),
+            Palette::TEXT,
+        );
         y += step;
-        self.draw_text(x + 6, y, &format!("-{} weakened", m.total_weakened), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("-{} weakened", m.total_weakened),
+            Palette::TEXT,
+        );
         y += step;
-        self.draw_text(x + 6, y, &format!("{} dormant", m.total_dormant), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("{} dormant", m.total_dormant),
+            Palette::TEXT,
+        );
         y += step + 4;
 
         // Spatial
         self.draw_text(x, y, "Spatial", Palette::TEXT_DIM);
         y += step;
-        self.draw_text(x + 6, y, &format!("{:.3} displace", m.mean_displacement), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("{:.3} displace", m.mean_displacement),
+            Palette::TEXT,
+        );
         y += step;
-        self.draw_text(x + 6, y, &format!("{} regions", m.region_count), Palette::TEXT);
+        self.draw_text(
+            x + 6,
+            y,
+            &format!("{} regions", m.region_count),
+            Palette::TEXT,
+        );
     }
 
     fn draw_util_bar(&mut self, x: u32, y: u32, fraction: f32, color: [u8; 3]) {
@@ -522,8 +614,12 @@ impl SnapshotRenderer {
             self.fill_rect(x, y, fill, bar_h, color);
         }
         // Percentage text
-        self.draw_text(x + bar_w + 4, y.saturating_sub(1),
-            &format!("{:.0}%", fraction * 100.0), Palette::TEXT);
+        self.draw_text(
+            x + bar_w + 4,
+            y.saturating_sub(1),
+            &format!("{:.0}%", fraction * 100.0),
+            Palette::TEXT,
+        );
     }
 
     fn draw_legend(&mut self) {
@@ -607,18 +703,16 @@ impl SnapshotWriter {
 
             while let Ok(req) = rx.recv() {
                 let pixels = renderer.render(&req);
-                let filename = format!("snapshot_{:03}_{}.png",
+                let filename = format!(
+                    "snapshot_{:03}_{}.png",
                     req.seq,
-                    req.label.to_lowercase().replace(' ', "_"));
+                    req.label.to_lowercase().replace(' ', "_")
+                );
                 let path = output_dir.join(&filename);
 
-                if let Err(e) = image::save_buffer(
-                    &path,
-                    pixels,
-                    IMG_W,
-                    IMG_H,
-                    image::ColorType::Rgb8,
-                ) {
+                if let Err(e) =
+                    image::save_buffer(&path, pixels, IMG_W, IMG_H, image::ColorType::Rgb8)
+                {
                     eprintln!("snapshot: failed to save {}: {}", path.display(), e);
                 } else {
                     println!("    [snapshot] Saved {}", path.display());

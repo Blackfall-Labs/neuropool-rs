@@ -344,7 +344,9 @@ impl CascadeEngine {
 
         if neuron.nuclei.is_memory() {
             // Collect local activity pattern from neighboring neurons' traces
-            let pattern: Vec<i16> = self.synapses.outgoing(idx as u32)
+            let pattern: Vec<i16> = self
+                .synapses
+                .outgoing(idx as u32)
                 .iter()
                 .filter(|s| s.is_active())
                 .take(8) // max 8 neighbors for pattern
@@ -407,10 +409,8 @@ impl CascadeEngine {
             let dt = sim_time.saturating_sub(self.neurons[idx].last_arrival_us);
             if dt > 0 && dt < self.config.fast_coincidence_window_us {
                 self.coincidence_events += 1;
-                let closeness =
-                    1.0 - (dt as f32 / self.config.fast_coincidence_window_us as f32);
-                (arrival.current as f32 * (1.0 + closeness * self.config.coincidence_boost))
-                    as i16
+                let closeness = 1.0 - (dt as f32 / self.config.fast_coincidence_window_us as f32);
+                (arrival.current as f32 * (1.0 + closeness * self.config.coincidence_boost)) as i16
             } else {
                 arrival.current
             }
@@ -427,14 +427,14 @@ impl CascadeEngine {
         if arrival.source != u32::MAX {
             let source_idx = arrival.source as usize;
             if source_idx < self.neurons.len() && source_idx != idx {
-                self.neurons[source_idx].trace =
-                    self.neurons[source_idx].trace.saturating_add(5);
+                self.neurons[source_idx].trace = self.neurons[source_idx].trace.saturating_add(5);
             }
         }
 
         // Apply threshold jitter for this event
         let jittered = if self.config.threshold_jitter > 0 {
-            let jitter = threshold_jitter(self.total_events, idx as u64, self.config.threshold_jitter);
+            let jitter =
+                threshold_jitter(self.total_events, idx as u64, self.config.threshold_jitter);
             let original = self.neurons[idx].threshold;
             self.neurons[idx].threshold = original.saturating_add(jitter);
             let can_fire = self.neurons[idx].can_fire(sim_time);
@@ -705,7 +705,9 @@ impl CascadeEngine {
 /// Returns a value in [-half_range, +half_range].
 fn threshold_jitter(event_count: u64, neuron_idx: u64, half_range: i16) -> i16 {
     // Fast hash: multiply by golden ratio constants, xorshift
-    let mut h = event_count.wrapping_mul(2654435761).wrapping_add(neuron_idx.wrapping_mul(2246822519));
+    let mut h = event_count
+        .wrapping_mul(2654435761)
+        .wrapping_add(neuron_idx.wrapping_mul(2246822519));
     h ^= h >> 16;
     h = h.wrapping_mul(0x45d9f3b);
     h ^= h >> 16;
@@ -718,7 +720,9 @@ fn threshold_jitter(event_count: u64, neuron_idx: u64, half_range: i16) -> i16 {
 ///
 /// Returns a value in 0..255 for probability comparison.
 fn spontaneous_hash(time: u64, neuron_idx: u64) -> u8 {
-    let mut h = time.wrapping_mul(6364136223846793005).wrapping_add(neuron_idx.wrapping_mul(1442695040888963407));
+    let mut h = time
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(neuron_idx.wrapping_mul(1442695040888963407));
     h ^= h >> 33;
     h = h.wrapping_mul(0xff51afd7ed558ccd);
     h ^= h >> 33;
@@ -753,7 +757,8 @@ mod tests {
     /// when context and feedback zones are at resting. Accounts for zone weight
     /// normalization: delta > (threshold - resting) * weight_sum / ff_weight.
     fn ff_fire_current(weights: &ZoneWeights) -> i16 {
-        let weight_sum = weights.feedforward as i32 + weights.context as i32 + weights.feedback as i32;
+        let weight_sum =
+            weights.feedforward as i32 + weights.context as i32 + weights.feedback as i32;
         let delta = (DEFAULT_THRESHOLD as i32 - RESTING_POTENTIAL as i32) * weight_sum
             / weights.feedforward as i32;
         (delta + 200) as i16 // +200 margin above threshold
@@ -867,7 +872,10 @@ mod tests {
         // (It may have fired too — that's fine. We check the burst count.)
         // Since neuron 0 burst-fired, neuron 1's context zone got a lateral spike.
         // If neuron 1 also fired, it would also be a burst (no prior context priming).
-        assert!(engine.total_events() >= 2, "should have processed multiple events");
+        assert!(
+            engine.total_events() >= 2,
+            "should have processed multiple events"
+        );
     }
 
     #[test]
@@ -971,7 +979,8 @@ mod tests {
         assert!(engine.total_spikes() >= 1);
         // Target should have received context input (last_arrival_us > 0 means a spike arrived)
         assert!(
-            engine.neurons[1].last_arrival_us > 0 || engine.neurons[1].context_potential > RESTING_POTENTIAL,
+            engine.neurons[1].last_arrival_us > 0
+                || engine.neurons[1].context_potential > RESTING_POTENTIAL,
             "target should receive context entrainment from oscillator"
         );
     }
@@ -1128,7 +1137,10 @@ mod tests {
             "feedback zone should accumulate: {}",
             engine.neurons[0].feedback_potential
         );
-        assert!(!engine.neurons[0].predicted, "feedback doesn't prime prediction");
+        assert!(
+            !engine.neurons[0].predicted,
+            "feedback doesn't prime prediction"
+        );
     }
 
     #[test]
@@ -1156,7 +1168,10 @@ mod tests {
             engine_no.inject_ff(i, fire_current, 100);
         }
         let spikes_no = engine_no.run_until(200);
-        assert_eq!(spikes_no, 10, "without jitter, all should fire at exact threshold");
+        assert_eq!(
+            spikes_no, 10,
+            "without jitter, all should fire at exact threshold"
+        );
 
         // With jitter: slightly below threshold → some fire, some don't
         let marginal_current = fire_current - 300; // slightly below threshold
@@ -1219,7 +1234,8 @@ mod tests {
         engine.sim_time_us = 1000;
         engine.check_spontaneous();
         assert_eq!(
-            engine.pending_count(), 0,
+            engine.pending_count(),
+            0,
             "oscillators should be skipped by spontaneous firing"
         );
     }

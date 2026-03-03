@@ -20,24 +20,27 @@
 //! - All nuclei factory presets (pyramidal, interneuron, gate, relay, etc.)
 //! - Learning pressure, maturity, eligibility traces — same mechanics
 
-mod zone;
-mod neuron;
-mod synapse;
 mod cascade;
-mod grid;
-mod wiring;
 mod disc;
+mod grid;
 mod incubate;
 mod io;
+mod neuron;
 mod persist;
+mod synapse;
+mod wiring;
+mod zone;
 
-pub use zone::{DendriticZone, ZoneWeights};
-pub use neuron::{UnifiedNeuron, VoxelPosition, DEFAULT_THRESHOLD, RESTING_POTENTIAL, RESET_POTENTIAL, CONTEXT_PRIMING_THRESHOLD};
-pub use synapse::{UnifiedSynapse, UnifiedSynapseStore};
-pub use cascade::{CascadeEngine, CascadeConfig, SpikeArrival, TernsigTrigger};
-pub use grid::{VoxelGrid, VoxelNeighborhood, GridDims};
-pub use wiring::{UnifiedWiringConfig, ZoneStrategy, wire_by_proximity};
-pub use disc::{ImaginalDisc, RegionArchetype, NucleiDistribution, WiringRules, ZoneBias};
-pub use incubate::{IncubatedPool, IncubateConfig, incubate};
-pub use io::{UnifiedNeuronIO, NullUnifiedIO};
+pub use cascade::{CascadeConfig, CascadeEngine, SpikeArrival, TernsigTrigger};
+pub use disc::{ImaginalDisc, NucleiDistribution, RegionArchetype, WiringRules, ZoneBias};
+pub use grid::{GridDims, VoxelGrid, VoxelNeighborhood};
+pub use incubate::{incubate, IncubateConfig, IncubatedPool};
+pub use io::{NullUnifiedIO, UnifiedNeuronIO};
+pub use neuron::{
+    UnifiedNeuron, VoxelPosition, CONTEXT_PRIMING_THRESHOLD, DEFAULT_THRESHOLD, RESET_POTENTIAL,
+    RESTING_POTENTIAL,
+};
 pub use persist::UnifiedPool;
+pub use synapse::{UnifiedSynapse, UnifiedSynapseStore};
+pub use wiring::{wire_by_proximity, UnifiedWiringConfig, ZoneStrategy};
+pub use zone::{DendriticZone, ZoneWeights};

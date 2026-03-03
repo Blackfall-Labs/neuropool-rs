@@ -68,7 +68,10 @@ impl Rng {
 
     /// Next u32 in [0, 2^32).
     fn next_u32(&mut self) -> u32 {
-        self.state = self.state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.state = self
+            .state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (self.state >> 33) as u32
     }
 
@@ -156,11 +159,7 @@ pub fn incubate(
 }
 
 /// Seed neurons with positions and nuclei based on the disc.
-fn seed_neurons(
-    disc: &ImaginalDisc,
-    count: u32,
-    rng: &mut Rng,
-) -> Vec<UnifiedNeuron> {
+fn seed_neurons(disc: &ImaginalDisc, count: u32, rng: &mut Rng) -> Vec<UnifiedNeuron> {
     let mut neurons = Vec::with_capacity(count as usize);
     let (gx, gy, gz) = disc.grid_dims;
     let dist = &disc.distribution;
@@ -254,7 +253,9 @@ fn wire_archetype(
             .into_iter()
             .filter(|&j| j != i as u32)
             .filter_map(|j| {
-                let dist_sq = neurons[i].position.distance_sq(&neurons[j as usize].position);
+                let dist_sq = neurons[i]
+                    .position
+                    .distance_sq(&neurons[j as usize].position);
                 if dist_sq <= rules.max_distance_sq {
                     Some((j, dist_sq))
                 } else {
@@ -391,8 +392,16 @@ mod tests {
         assert_eq!(pool.settling_steps, 10);
 
         // Should have multiple nuclei types
-        let pyramidal_count = pool.neurons.iter().filter(|n| n.nuclei.is_excitatory() && !n.nuclei.is_oscillator()).count();
-        let inhibitory_count = pool.neurons.iter().filter(|n| n.nuclei.is_inhibitory()).count();
+        let pyramidal_count = pool
+            .neurons
+            .iter()
+            .filter(|n| n.nuclei.is_excitatory() && !n.nuclei.is_oscillator())
+            .count();
+        let inhibitory_count = pool
+            .neurons
+            .iter()
+            .filter(|n| n.nuclei.is_inhibitory())
+            .count();
         assert!(pyramidal_count > 0, "should have pyramidal neurons");
         assert!(inhibitory_count > 0, "should have inhibitory neurons");
     }
@@ -411,7 +420,11 @@ mod tests {
         assert!(pool.synapses.len() > 0);
 
         // Thalamic should have gate/relay neurons
-        let gate_count = pool.neurons.iter().filter(|n| n.nuclei.leak >= 200 && n.nuclei.is_excitatory()).count();
+        let gate_count = pool
+            .neurons
+            .iter()
+            .filter(|n| n.nuclei.leak >= 200 && n.nuclei.is_excitatory())
+            .count();
         assert!(gate_count > 0, "thalamic should have gate neurons");
     }
 
@@ -446,7 +459,11 @@ mod tests {
         assert_eq!(pool.neurons.len(), 40);
 
         // Brainstem should be oscillator-heavy
-        let osc_count = pool.neurons.iter().filter(|n| n.nuclei.is_oscillator()).count();
+        let osc_count = pool
+            .neurons
+            .iter()
+            .filter(|n| n.nuclei.is_oscillator())
+            .count();
         assert!(
             osc_count >= 10,
             "brainstem should have many oscillators, got {}",
@@ -486,9 +503,20 @@ mod tests {
         // Different seeds should produce different wiring
         // (neurons are sorted by voxel, so positions might be similar,
         // but synapse targets should differ)
-        let synapses1: Vec<(u32, u32)> = pool1.synapses.iter().map(|s| (s.source, s.target)).collect();
-        let synapses2: Vec<(u32, u32)> = pool2.synapses.iter().map(|s| (s.source, s.target)).collect();
-        assert_ne!(synapses1, synapses2, "different seeds should produce different wiring");
+        let synapses1: Vec<(u32, u32)> = pool1
+            .synapses
+            .iter()
+            .map(|s| (s.source, s.target))
+            .collect();
+        let synapses2: Vec<(u32, u32)> = pool2
+            .synapses
+            .iter()
+            .map(|s| (s.source, s.target))
+            .collect();
+        assert_ne!(
+            synapses1, synapses2,
+            "different seeds should produce different wiring"
+        );
     }
 
     #[test]

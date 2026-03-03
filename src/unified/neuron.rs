@@ -5,8 +5,8 @@
 //! Replaces `Soma { position: [f32; 3] }` with integer voxel + local coords.
 //! Adds three dendritic zone potentials and predicted/burst firing state.
 
-use crate::spatial::{Axon, Dendrite, Nuclei};
 use super::zone::{DendriticZone, ZoneWeights};
+use crate::spatial::{Axon, Dendrite, Nuclei};
 
 /// Position within the voxel grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -27,7 +27,10 @@ impl VoxelPosition {
     /// Create a position at a voxel center (local = 8,8,8).
     #[inline]
     pub const fn at_center(voxel: (u16, u16, u16)) -> Self {
-        Self { voxel, local: (8, 8, 8) }
+        Self {
+            voxel,
+            local: (8, 8, 8),
+        }
     }
 
     /// Squared distance to another position (integer arithmetic).
@@ -138,12 +141,7 @@ fn weights_for_nuclei(nuclei: &Nuclei) -> ZoneWeights {
 
 impl UnifiedNeuron {
     /// Create a neuron with explicit anatomy.
-    pub fn new(
-        position: VoxelPosition,
-        dendrite: Dendrite,
-        axon: Axon,
-        nuclei: Nuclei,
-    ) -> Self {
+    pub fn new(position: VoxelPosition, dendrite: Dendrite, axon: Axon, nuclei: Nuclei) -> Self {
         let zone_weights = weights_for_nuclei(&nuclei);
         Self {
             position,
@@ -168,27 +166,52 @@ impl UnifiedNeuron {
 
     /// Pyramidal cell at a voxel position.
     pub fn pyramidal_at(pos: VoxelPosition) -> Self {
-        Self::new(pos, Dendrite::standard(), Axon::default(), Nuclei::pyramidal())
+        Self::new(
+            pos,
+            Dendrite::standard(),
+            Axon::default(),
+            Nuclei::pyramidal(),
+        )
     }
 
     /// Interneuron at a voxel position.
     pub fn interneuron_at(pos: VoxelPosition) -> Self {
-        Self::new(pos, Dendrite::new(0.5, 50), Axon::default(), Nuclei::interneuron())
+        Self::new(
+            pos,
+            Dendrite::new(0.5, 50),
+            Axon::default(),
+            Nuclei::interneuron(),
+        )
     }
 
     /// Sensory neuron at a voxel position.
     pub fn sensory_at(pos: VoxelPosition, channel: u16, modality: u8) -> Self {
-        Self::new(pos, Dendrite::standard(), Axon::default(), Nuclei::sensory(channel, modality))
+        Self::new(
+            pos,
+            Dendrite::standard(),
+            Axon::default(),
+            Nuclei::sensory(channel, modality),
+        )
     }
 
     /// Motor neuron at a voxel position.
     pub fn motor_at(pos: VoxelPosition, channel: u16, modality: u8) -> Self {
-        Self::new(pos, Dendrite::standard(), Axon::default(), Nuclei::motor(channel, modality))
+        Self::new(
+            pos,
+            Dendrite::standard(),
+            Axon::default(),
+            Nuclei::motor(channel, modality),
+        )
     }
 
     /// Oscillator neuron at a voxel position.
     pub fn oscillator_at(pos: VoxelPosition, period_us: u32) -> Self {
-        Self::new(pos, Dendrite::standard(), Axon::default(), Nuclei::oscillator(period_us))
+        Self::new(
+            pos,
+            Dendrite::standard(),
+            Axon::default(),
+            Nuclei::oscillator(period_us),
+        )
     }
 
     /// Gate neuron at a voxel position.
@@ -203,12 +226,22 @@ impl UnifiedNeuron {
 
     /// Memory neuron at a voxel position.
     pub fn memory_at(pos: VoxelPosition, bank_id: u16) -> Self {
-        Self::new(pos, Dendrite::standard(), Axon::default(), Nuclei::memory(bank_id))
+        Self::new(
+            pos,
+            Dendrite::standard(),
+            Axon::default(),
+            Nuclei::memory(bank_id),
+        )
     }
 
     /// Ternsig-bound neuron at a voxel position.
     pub fn ternsig_at(pos: VoxelPosition, program_id: u32) -> Self {
-        Self::new(pos, Dendrite::standard(), Axon::default(), Nuclei::ternsig(program_id))
+        Self::new(
+            pos,
+            Dendrite::standard(),
+            Axon::default(),
+            Nuclei::ternsig(program_id),
+        )
     }
 
     // === Zone Integration ===
@@ -412,7 +445,10 @@ mod tests {
 
         // Push context above priming threshold
         n.integrate_zone(DendriticZone::Context, 2000);
-        assert!(n.predicted, "context above threshold should prime prediction");
+        assert!(
+            n.predicted,
+            "context above threshold should prime prediction"
+        );
     }
 
     #[test]

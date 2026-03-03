@@ -43,8 +43,8 @@
 // === Core Data Structures ===
 mod anatomy;
 mod interface;
-mod nuclei;
 mod neuron;
+mod nuclei;
 mod plasticity;
 mod synapse;
 
@@ -67,27 +67,27 @@ mod snapshot;
 // === Core Exports ===
 pub use anatomy::{Axon, Dendrite, Soma};
 pub use interface::{EnergyGates, Interface, InterfaceAction};
-pub use nuclei::Nuclei;
 pub use neuron::SpatialNeuron;
+pub use nuclei::Nuclei;
 pub use plasticity::{
-    MasteryConfig, MasteryState, PolarityChange,
-    HubTracker, FlipCooldown,
-    learning_direction, modification_cost, is_participant,
+    is_participant, learning_direction, modification_cost, FlipCooldown, HubTracker, MasteryConfig,
+    MasteryState, PolarityChange,
 };
 pub use synapse::{SpatialSynapse, SpatialSynapseStore};
 
 // === Execution Exports ===
 pub use cascade::{SpatialCascade, SpatialCascadeConfig, SpikeArrival};
-pub use migration::{MigrationConfig, CorrelationTracker, CorrelationEntry, compute_migration_forces, apply_migration, migrate_step};
-pub use pruning::{PruningConfig, PruningResult, DormancyTracker, pruning_cycle, hard_prune};
-pub use runtime::{SpatialRuntime, SpatialRuntimeConfig, LearningCounters, StructuralCounters};
-pub use wiring::{WiringConfig, wire_by_proximity};
-pub use tissue::{
-    TissueField, TissueConfig, TissueType,
-    SpatialHash, GridKey, AxonSegment,
-    EmergentRegion, RegionConfig, NucleiSignature,
-    detect_regions,
+pub use migration::{
+    apply_migration, compute_migration_forces, migrate_step, CorrelationEntry, CorrelationTracker,
+    MigrationConfig,
 };
+pub use pruning::{hard_prune, pruning_cycle, DormancyTracker, PruningConfig, PruningResult};
+pub use runtime::{LearningCounters, SpatialRuntime, SpatialRuntimeConfig, StructuralCounters};
+pub use tissue::{
+    detect_regions, AxonSegment, EmergentRegion, GridKey, NucleiSignature, RegionConfig,
+    SpatialHash, TissueConfig, TissueField, TissueType,
+};
+pub use wiring::{wire_by_proximity, WiringConfig};
 
 // Re-export ternary_signal types for convenience
 pub use ternary_signal::{Polarity, Signal};

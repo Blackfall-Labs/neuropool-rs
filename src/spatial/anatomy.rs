@@ -22,7 +22,9 @@ impl Soma {
     /// Create a soma at the origin.
     #[inline]
     pub const fn origin() -> Self {
-        Self { position: [0.0, 0.0, 0.0] }
+        Self {
+            position: [0.0, 0.0, 0.0],
+        }
     }
 
     /// Euclidean distance to another soma.
@@ -62,13 +64,19 @@ impl Dendrite {
     /// Create a dendrite with given radius and spine count.
     #[inline]
     pub const fn new(radius: f32, spine_count: u16) -> Self {
-        Self { radius, spine_count }
+        Self {
+            radius,
+            spine_count,
+        }
     }
 
     /// Default dendrite with 1.0 radius and 100 spines.
     #[inline]
     pub const fn standard() -> Self {
-        Self { radius: 1.0, spine_count: 100 }
+        Self {
+            radius: 1.0,
+            spine_count: 100,
+        }
     }
 
     /// Can this dendrite accept more synapses?

@@ -20,8 +20,7 @@
 //! Run with: cargo run --example spatial_prototype
 
 use neuropool::{
-    NeuronPool, PoolConfig, DensityField, NeuronType,
-    SignalType, TemplateType, TemplateRequest,
+    DensityField, NeuronPool, NeuronType, PoolConfig, SignalType, TemplateRequest, TemplateType,
 };
 
 fn main() {
@@ -45,12 +44,17 @@ fn main() {
 
     // Region 1: Edge Detection (Lateral Inhibition)
     let li_request = TemplateRequest {
-        template_type: TemplateType::LateralInhibition { scale: 8, surround_ratio: 4 },
+        template_type: TemplateType::LateralInhibition {
+            scale: 8,
+            surround_ratio: 4,
+        },
         input_signal: SignalType::VisualRetinal,
         output_signal: SignalType::VisualEdge,
         position_hint: Some([1.5, 3.0, 3.0]),
     };
-    let li_id = pool.spawn_template(li_request, 42).expect("LI spawn failed");
+    let li_id = pool
+        .spawn_template(li_request, 42)
+        .expect("LI spawn failed");
 
     // Region 2: Pattern Classification (Winner-Take-All)
     let wta_request = TemplateRequest {
@@ -59,16 +63,23 @@ fn main() {
         output_signal: SignalType::MotorCommand,
         position_hint: Some([4.5, 3.0, 3.0]),
     };
-    let wta_id = pool.spawn_template(wta_request, 123).expect("WTA spawn failed");
+    let wta_id = pool
+        .spawn_template(wta_request, 123)
+        .expect("WTA spawn failed");
 
     // Region 3: Rhythm Generator (Oscillator) - Independent
     let osc_request = TemplateRequest {
-        template_type: TemplateType::OscillatorNetwork { pacemaker_hz: 20, follower_count: 6 },
+        template_type: TemplateType::OscillatorNetwork {
+            pacemaker_hz: 20,
+            follower_count: 6,
+        },
         input_signal: SignalType::SensoryRaw,
         output_signal: SignalType::AuditoryRhythm,
         position_hint: Some([3.0, 1.0, 3.0]),
     };
-    let osc_id = pool.spawn_template(osc_request, 456).expect("Osc spawn failed");
+    let osc_id = pool
+        .spawn_template(osc_request, 456)
+        .expect("Osc spawn failed");
 
     // =========================================================================
     // Phase 3: Analyze what was created - copy data to avoid borrow issues
@@ -78,34 +89,58 @@ fn main() {
     // Copy template data to avoid holding borrows
     let (li_neurons, li_centroid, li_input, li_output) = {
         let t = pool.get_template(li_id).unwrap();
-        (t.neuron_indices.clone(), t.centroid, t.input_signal, t.output_signal)
+        (
+            t.neuron_indices.clone(),
+            t.centroid,
+            t.input_signal,
+            t.output_signal,
+        )
     };
     let (wta_neurons, wta_centroid, wta_input, wta_output) = {
         let t = pool.get_template(wta_id).unwrap();
-        (t.neuron_indices.clone(), t.centroid, t.input_signal, t.output_signal)
+        (
+            t.neuron_indices.clone(),
+            t.centroid,
+            t.input_signal,
+            t.output_signal,
+        )
     };
     let (osc_neurons, osc_centroid, osc_input, osc_output) = {
         let t = pool.get_template(osc_id).unwrap();
-        (t.neuron_indices.clone(), t.centroid, t.input_signal, t.output_signal)
+        (
+            t.neuron_indices.clone(),
+            t.centroid,
+            t.input_signal,
+            t.output_signal,
+        )
     };
 
     println!("  Region 1: Edge Detection (LI)");
     println!("    Neurons: {}", li_neurons.len());
-    println!("    Centroid: ({:.1}, {:.1}, {:.1})", li_centroid[0], li_centroid[1], li_centroid[2]);
+    println!(
+        "    Centroid: ({:.1}, {:.1}, {:.1})",
+        li_centroid[0], li_centroid[1], li_centroid[2]
+    );
     println!("    Needs: {:?}", li_input);
     println!("    Offers: {:?}", li_output);
     print_neuron_types(&pool, &li_neurons);
 
     println!("\n  Region 2: Classification (WTA)");
     println!("    Neurons: {}", wta_neurons.len());
-    println!("    Centroid: ({:.1}, {:.1}, {:.1})", wta_centroid[0], wta_centroid[1], wta_centroid[2]);
+    println!(
+        "    Centroid: ({:.1}, {:.1}, {:.1})",
+        wta_centroid[0], wta_centroid[1], wta_centroid[2]
+    );
     println!("    Needs: {:?} <- LI offers this!", wta_input);
     println!("    Offers: {:?}", wta_output);
     print_neuron_types(&pool, &wta_neurons);
 
     println!("\n  Region 3: Rhythm (Oscillator) - Independent");
     println!("    Neurons: {}", osc_neurons.len());
-    println!("    Centroid: ({:.1}, {:.1}, {:.1})", osc_centroid[0], osc_centroid[1], osc_centroid[2]);
+    println!(
+        "    Centroid: ({:.1}, {:.1}, {:.1})",
+        osc_centroid[0], osc_centroid[1], osc_centroid[2]
+    );
     println!("    Needs: {:?}", osc_input);
     println!("    Offers: {:?}", osc_output);
     print_neuron_types(&pool, &osc_neurons);
@@ -124,17 +159,33 @@ fn main() {
     let offering_motor = pool.templates_offering(SignalType::MotorCommand);
 
     println!("  Signal flow analysis:");
-    println!("    VisualRetinal -> {:?} (LI receives raw input)", needing_retinal);
+    println!(
+        "    VisualRetinal -> {:?} (LI receives raw input)",
+        needing_retinal
+    );
     println!("    VisualEdge offered by {:?}", offering_edge);
-    println!("    VisualEdge needed by {:?} (WTA receives from LI)", needing_edge);
-    println!("    MotorCommand offered by {:?} (WTA outputs decision)", offering_motor);
+    println!(
+        "    VisualEdge needed by {:?} (WTA receives from LI)",
+        needing_edge
+    );
+    println!(
+        "    MotorCommand offered by {:?} (WTA outputs decision)",
+        offering_motor
+    );
 
     // Check cooperation link
     let li_offers_edge = offering_edge.contains(&li_id);
     let wta_needs_edge = needing_edge.contains(&wta_id);
-    println!("\n  Cooperation link: LI({}) -> WTA({}): {}",
-             li_id, wta_id,
-             if li_offers_edge && wta_needs_edge { "NEED/OFFER MATCHED" } else { "BROKEN" });
+    println!(
+        "\n  Cooperation link: LI({}) -> WTA({}): {}",
+        li_id,
+        wta_id,
+        if li_offers_edge && wta_needs_edge {
+            "NEED/OFFER MATCHED"
+        } else {
+            "BROKEN"
+        }
+    );
 
     // =========================================================================
     // Phase 5: Wire inter-template connections (axon growth)
@@ -160,7 +211,10 @@ fn main() {
         let dz = li_centroid[2] - wta_centroid[2];
         (dx * dx + dy * dy + dz * dz).sqrt()
     };
-    println!("  LI -> WTA distance: {:.2} (max_dist: {})", li_to_wta_dist, max_dist);
+    println!(
+        "  LI -> WTA distance: {:.2} (max_dist: {})",
+        li_to_wta_dist, max_dist
+    );
 
     // =========================================================================
     // Phase 6: Simulate problem solving (with connections)
@@ -192,18 +246,25 @@ fn main() {
         osc_spikes.push(osc_s);
 
         if tick < 5 || li_s > 0 || wta_s > 0 || osc_s > 0 {
-            println!("    Tick {:2}: LI={}, WTA={}, Osc={}", tick, li_s, wta_s, osc_s);
+            println!(
+                "    Tick {:2}: LI={}, WTA={}, Osc={}",
+                tick, li_s, wta_s, osc_s
+            );
         }
     }
 
     // Test 2: Check if WTA received signal from LI
     println!("\n  Test 2: Did LI output reach WTA?");
-    let wta_membrane: Vec<i16> = wta_neurons.iter()
+    let wta_membrane: Vec<i16> = wta_neurons
+        .iter()
         .map(|&i| pool.neurons.membrane[i])
         .collect();
     let wta_max_membrane = wta_membrane.iter().cloned().max().unwrap_or(i16::MIN);
     let wta_min_membrane = wta_membrane.iter().cloned().min().unwrap_or(0);
-    println!("    WTA membrane range: {} to {} (threshold: -14080)", wta_min_membrane, wta_max_membrane);
+    println!(
+        "    WTA membrane range: {} to {} (threshold: -14080)",
+        wta_min_membrane, wta_max_membrane
+    );
 
     // Test 3: Check oscillator ISOLATION (control)
     println!("\n  Test 3: Oscillator isolation (control case)");
@@ -211,23 +272,34 @@ fn main() {
     let li_total: u32 = li_spikes.iter().sum();
     let wta_total: u32 = wta_spikes.iter().sum();
     println!("    Oscillator fired {} times", osc_total);
-    println!("    LI->WTA pressure routing: LI={} -> WTA={}", li_total, wta_total);
+    println!(
+        "    LI->WTA pressure routing: LI={} -> WTA={}",
+        li_total, wta_total
+    );
 
     // Check if oscillator membrane was affected by LI/WTA activity
-    let osc_membrane: Vec<i16> = osc_neurons.iter()
+    let osc_membrane: Vec<i16> = osc_neurons
+        .iter()
         .map(|&i| pool.neurons.membrane[i])
         .collect();
     let osc_max_membrane = osc_membrane.iter().cloned().max().unwrap_or(i16::MIN);
     let osc_resting = pool.config.resting_potential;
     let osc_drift = (osc_max_membrane - osc_resting).abs();
-    println!("    Osc membrane drift from resting: {} (should be ~0 if isolated)", osc_drift);
+    println!(
+        "    Osc membrane drift from resting: {} (should be ~0 if isolated)",
+        osc_drift
+    );
 
     // =========================================================================
     // Phase 7: Performance metrics
     // =========================================================================
     println!("\nPhase 7: Performance metrics...\n");
 
-    let total_spikes: u32 = li_spikes.iter().chain(wta_spikes.iter()).chain(osc_spikes.iter()).sum();
+    let total_spikes: u32 = li_spikes
+        .iter()
+        .chain(wta_spikes.iter())
+        .chain(osc_spikes.iter())
+        .sum();
     let li_rate = li_spikes.iter().sum::<u32>() as f32 / 20.0;
     let wta_rate = wta_spikes.iter().sum::<u32>() as f32 / 20.0;
     let osc_rate = osc_spikes.iter().sum::<u32>() as f32 / 20.0;
@@ -241,9 +313,18 @@ fn main() {
     // Fitness after simulation
     pool.update_template_fitness(0.3);
     println!("\n  Fitness after simulation:");
-    println!("    LI:  {:.3}", pool.template_fitness(li_id).unwrap_or(0.0));
-    println!("    WTA: {:.3}", pool.template_fitness(wta_id).unwrap_or(0.0));
-    println!("    Osc: {:.3}", pool.template_fitness(osc_id).unwrap_or(0.0));
+    println!(
+        "    LI:  {:.3}",
+        pool.template_fitness(li_id).unwrap_or(0.0)
+    );
+    println!(
+        "    WTA: {:.3}",
+        pool.template_fitness(wta_id).unwrap_or(0.0)
+    );
+    println!(
+        "    Osc: {:.3}",
+        pool.template_fitness(osc_id).unwrap_or(0.0)
+    );
 
     // =========================================================================
     // Phase 8: Density distribution
@@ -255,15 +336,27 @@ fn main() {
     density_field.update_from_positions(&positions);
 
     println!("  Density at region centroids:");
-    println!("    LI  ({:.1},{:.1},{:.1}): {:.1}",
-             li_centroid[0], li_centroid[1], li_centroid[2],
-             density_field.density_at(li_centroid));
-    println!("    WTA ({:.1},{:.1},{:.1}): {:.1}",
-             wta_centroid[0], wta_centroid[1], wta_centroid[2],
-             density_field.density_at(wta_centroid));
-    println!("    Osc ({:.1},{:.1},{:.1}): {:.1}",
-             osc_centroid[0], osc_centroid[1], osc_centroid[2],
-             density_field.density_at(osc_centroid));
+    println!(
+        "    LI  ({:.1},{:.1},{:.1}): {:.1}",
+        li_centroid[0],
+        li_centroid[1],
+        li_centroid[2],
+        density_field.density_at(li_centroid)
+    );
+    println!(
+        "    WTA ({:.1},{:.1},{:.1}): {:.1}",
+        wta_centroid[0],
+        wta_centroid[1],
+        wta_centroid[2],
+        density_field.density_at(wta_centroid)
+    );
+    println!(
+        "    Osc ({:.1},{:.1},{:.1}): {:.1}",
+        osc_centroid[0],
+        osc_centroid[1],
+        osc_centroid[2],
+        density_field.density_at(osc_centroid)
+    );
 
     // =========================================================================
     // Summary
@@ -271,15 +364,29 @@ fn main() {
     println!("\n=== Summary ===\n");
 
     println!("  Structure:");
-    println!("    {} neurons from {} templates", pool.n_neurons, pool.template_count());
+    println!(
+        "    {} neurons from {} templates",
+        pool.n_neurons,
+        pool.template_count()
+    );
 
     println!("\n  Cooperation (LI -> WTA):");
     let cooperation_works = li_offers_edge && wta_needs_edge;
-    println!("    Need/Offer link: {}", if cooperation_works { "ESTABLISHED" } else { "BROKEN" });
+    println!(
+        "    Need/Offer link: {}",
+        if cooperation_works {
+            "ESTABLISHED"
+        } else {
+            "BROKEN"
+        }
+    );
 
     println!("\n  Independence (Oscillator):");
     let osc_independent = osc_total > 0;
-    println!("    Self-sustaining rhythm: {}", if osc_independent { "YES" } else { "NO" });
+    println!(
+        "    Self-sustaining rhythm: {}",
+        if osc_independent { "YES" } else { "NO" }
+    );
 
     println!("\n  Activity:");
     println!("    LI fired: {} spikes", li_spikes.iter().sum::<u32>());
@@ -296,7 +403,8 @@ fn main() {
 
 /// Count how many neurons in a region spiked this tick
 fn count_spikes(pool: &NeuronPool, indices: &[usize]) -> u32 {
-    indices.iter()
+    indices
+        .iter()
         .filter(|&&i| pool.neurons.spike_out[i])
         .count() as u32
 }
@@ -328,13 +436,29 @@ fn print_neuron_types(pool: &NeuronPool, indices: &[usize]) {
     }
 
     print!("    Types: ");
-    if comp > 0 { print!("Comp={} ", comp); }
-    if gate > 0 { print!("Gate={} ", gate); }
-    if osc > 0 { print!("Osc={} ", osc); }
-    if mem_r > 0 { print!("MemR={} ", mem_r); }
-    if mem_m > 0 { print!("MemM={} ", mem_m); }
-    if sens > 0 { print!("Sens={} ", sens); }
-    if mot > 0 { print!("Mot={} ", mot); }
-    if relay > 0 { print!("Relay={} ", relay); }
+    if comp > 0 {
+        print!("Comp={} ", comp);
+    }
+    if gate > 0 {
+        print!("Gate={} ", gate);
+    }
+    if osc > 0 {
+        print!("Osc={} ", osc);
+    }
+    if mem_r > 0 {
+        print!("MemR={} ", mem_r);
+    }
+    if mem_m > 0 {
+        print!("MemM={} ", mem_m);
+    }
+    if sens > 0 {
+        print!("Sens={} ", sens);
+    }
+    if mot > 0 {
+        print!("Mot={} ", mot);
+    }
+    if relay > 0 {
+        print!("Relay={} ", relay);
+    }
     println!();
 }
