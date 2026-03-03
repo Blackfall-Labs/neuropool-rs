@@ -1,0 +1,81 @@
+rune "similarity_detect" do
+  version 1
+  namespace :nuclei
+end
+
+# Similarity Detect — pattern matching neuron.
+#
+# Hardware: general interneuron.
+# Behavior: computes similarity between feedforward input and
+# feedback template. High similarity = recognition signal.
+# Learns to sharpen tuning via mastery: strengthens connections
+# that contribute to correct matches, weakens noisy ones.
+#
+# Role: inferotemporal cortex (object recognition),
+# fusiform face area, auditory pattern recognition,
+# lexical access (word form matching).
+
+use :signal
+use :cascade
+use :chem
+use :learning
+
+# Zone inputs
+# ff_zone: incoming pattern
+# fb_zone: stored template / expectation
+
+# Compute normalized dot product as similarity measure
+# Both zones contribute signal vectors; dot product measures alignment
+ff_current = zone_integrate(ff_zone, ctx_zone, fb_zone, 256, 0, 0)
+fb_current = zone_integrate(ff_zone, ctx_zone, fb_zone, 0, 0, 256)
+
+# Similarity: high when both are strong and same sign
+# Simple approximation: if both positive and similar magnitude, high similarity
+if ff_current > 0 do
+  if fb_current > 0 do
+    # Both excitatory — compute overlap
+    if ff_current > fb_current do
+      smaller = fb_current
+    else do
+      smaller = ff_current
+    end
+    similarity = smaller * 256 / (ff_current + fb_current + 1)
+  else do
+    similarity = 0
+  end
+else do
+  if ff_current < 0 do
+    if fb_current < 0 do
+      # Both inhibitory — also a match
+      ff_abs = 0 - ff_current
+      fb_abs = 0 - fb_current
+      if ff_abs > fb_abs do
+        smaller = fb_abs
+      else do
+        smaller = ff_abs
+      end
+      similarity = smaller * 256 / (ff_abs + fb_abs + 1)
+    else do
+      similarity = 0
+    end
+  else do
+    similarity = 0
+  end
+end
+
+# Serotonin sharpens recognition (lowers threshold for match)
+ser = read(:serotonin)
+match_threshold = 80 - ser * 20 / 128
+
+if similarity > match_threshold do
+  out_mag = similarity * 180 / 256
+  if out_mag < 15 do
+    out_mag = 15
+  end
+  if out_mag > 200 do
+    out_mag = 200
+  end
+  spike(1, out_mag)
+else do
+  spike(0, 0)
+end

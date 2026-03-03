@@ -1,0 +1,53 @@
+rune "novelty_detect" do
+  version 1
+  namespace :nuclei
+end
+
+# Novelty Detect — mismatch/surprise detector.
+#
+# Hardware: general interneuron.
+# Behavior: compares feedforward (incoming) against feedback
+# (predicted/expected). Large mismatch = novelty signal.
+# Learns to predict routine patterns so only genuine surprises fire.
+#
+# Role: hippocampal novelty detection, anterior cingulate
+# conflict monitoring, sensory prediction error.
+
+use :signal
+use :cascade
+use :chem
+use :learning
+
+# Zone inputs
+# ff_zone: incoming sensory/convergence data
+# fb_zone: top-down predictions
+
+# Compute zone currents separately
+ff_current = zone_integrate(ff_zone, ctx_zone, fb_zone, 256, 0, 0)
+fb_current = zone_integrate(ff_zone, ctx_zone, fb_zone, 0, 0, 256)
+
+# Mismatch = absolute difference between incoming and predicted
+if ff_current > fb_current do
+  mismatch = ff_current - fb_current
+else do
+  mismatch = fb_current - ff_current
+end
+
+# Chemical modulation: norepinephrine lowers novelty threshold (more alert)
+ne = read(:norepinephrine)
+novelty_threshold = 80 - ne * 30 / 128
+
+if mismatch > novelty_threshold do
+  # Novelty detected — signal strength proportional to mismatch
+  out_mag = mismatch * 180 / 1000
+  if out_mag < 20 do
+    out_mag = 20
+  end
+  if out_mag > 200 do
+    out_mag = 200
+  end
+  spike(1, out_mag)
+else do
+  # Predicted/routine — no output
+  spike(0, 0)
+end

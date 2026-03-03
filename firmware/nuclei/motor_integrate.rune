@@ -1,0 +1,48 @@
+rune "motor_integrate" do
+  version 1
+  namespace :nuclei
+end
+
+# Motor Integrate — output motor neuron.
+#
+# Hardware: Interface::Motor.
+# Behavior: accumulates convergence input across all three zones,
+# applies a high firing threshold (motor actions should be decisive),
+# and emits a strong output signal when threshold is crossed.
+# Learns which input patterns produce effective motor commands.
+#
+# Role: motor cortex output, brainstem motor nuclei,
+# speech production, autonomic output.
+
+use :signal
+use :cascade
+use :chem
+use :learning
+
+# Zone inputs — balanced integration for motor convergence
+# ff=102(40%), ctx=102(40%), fb=51(20%)
+input = zone_integrate(ff_zone, ctx_zone, fb_zone, 102, 102, 51)
+
+# Motor threshold is high — must have convergent evidence to act
+# Dopamine lowers threshold (facilitates action)
+da = read(:dopamine)
+gaba = read(:gaba)
+
+# DA facilitates, GABA inhibits (basal ganglia GO/NOGO)
+motor_threshold = 120 - da * 40 / 128 + gaba * 30 / 128
+
+# Membrane integration with moderate leak
+membrane = membrane_update(membrane, input, 51)
+
+# Motor decision
+fired = fire_check(membrane, motor_threshold)
+if fired == 1 do
+  # Strong, decisive output
+  out_mag = 160 + input * 40 / 1000
+  if out_mag > 230 do
+    out_mag = 230
+  end
+  spike(1, out_mag)
+else do
+  spike(0, 0)
+end

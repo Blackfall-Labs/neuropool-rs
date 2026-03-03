@@ -1,0 +1,52 @@
+rune "selective_gate" do
+  version 1
+  namespace :nuclei
+end
+
+# Selective Gate — inhibitory gating neuron.
+#
+# Hardware: inhibitory, high chemical sensitivity.
+# Behavior: reads context zone for gating signals, reads feedforward
+# zone for content. If context says "pass" (excitatory context above
+# threshold), relays feedforward content as inhibitory output.
+# If context says "block" (below threshold), stays silent.
+#
+# Learns which context patterns predict useful gating via mastery.
+#
+# Role: thalamic reticular nucleus (attention gating),
+# basal ganglia indirect pathway (action suppression),
+# cortical interneuron lateral inhibition.
+
+use :signal
+use :cascade
+use :chem
+use :learning
+
+# Zone inputs (pre-populated by cascade engine)
+# ff_zone: content to gate
+# ctx_zone: gating control signals
+# fb_zone: top-down modulation
+
+# Gate weights: context-dominant (inhibitory interneuron profile)
+# ff=51(20%), ctx=128(50%), fb=77(30%)
+input = zone_integrate(ff_zone, ctx_zone, fb_zone, 51, 128, 77)
+
+# Chemical gating: dopamine raises gate threshold (harder to inhibit)
+da = read(:dopamine)
+gate_threshold = 40 + da * 20 / 128
+
+# Gating decision
+if input > gate_threshold do
+  # Gate opens — emit inhibitory output proportional to input strength
+  out_mag = input * 200 / 1000
+  if out_mag < 10 do
+    out_mag = 10
+  end
+  if out_mag > 200 do
+    out_mag = 200
+  end
+  spike(-1, out_mag)
+else do
+  # Gate closed — silence
+  spike(0, 0)
+end

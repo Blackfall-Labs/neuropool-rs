@@ -1,0 +1,41 @@
+rune "pacemaker" do
+  version 1
+  namespace :nuclei
+end
+
+# Pacemaker — autonomous oscillatory firing.
+#
+# Hardware: oscillation_period > 0, excitatory.
+# Behavior: fires at a fixed rhythm regardless of input.
+# The oscillation period is set by nuclei hardware (not this program).
+# This program reads accumulated zone input and modulates output
+# magnitude based on chemical state, but ALWAYS fires.
+#
+# Role: brainstem respiratory/cardiac rhythm, thalamic clock,
+# cortical oscillators (theta, alpha, gamma).
+
+use :signal
+use :cascade
+use :chem
+
+# Read chemical modulation
+ne = read(:norepinephrine)
+ach = read(:acetylcholine)
+
+# Arousal boost: NE increases output magnitude
+# Parasympathetic: ACh dampens output magnitude
+base_magnitude = 120
+arousal_boost = ne * 30 / 128
+calming = ach * 20 / 128
+magnitude = base_magnitude + arousal_boost - calming
+
+# Clamp to valid range
+if magnitude < 20 do
+  magnitude = 20
+end
+if magnitude > 200 do
+  magnitude = 200
+end
+
+# Pacemakers always fire — that's the point
+spike(1, magnitude)

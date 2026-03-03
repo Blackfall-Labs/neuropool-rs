@@ -1,0 +1,57 @@
+rune "multimodal_bind" do
+  version 1
+  namespace :nuclei
+end
+
+# Multimodal Bind — cross-modal binding neuron.
+#
+# Hardware: general interneuron.
+# Behavior: detects temporal coincidence across zones. When
+# feedforward (one modality) and context (another modality)
+# arrive within the same cascade window, fires a binding signal.
+# Learns which cross-modal patterns co-occur reliably.
+#
+# Role: temporal-parietal junction (audio-visual binding),
+# convergence zones (concept formation), sensory integration.
+
+use :signal
+use :cascade
+use :chem
+use :learning
+
+# Zone inputs
+# ff_zone: primary modality input
+# ctx_zone: secondary modality / lateral associations
+# fb_zone: top-down conceptual expectations
+
+# Balanced integration — both primary and secondary matter equally
+# ff=128(50%), ctx=128(50%), fb=0(0%) — binding is bottom-up
+ff_strength = zone_integrate(ff_zone, ctx_zone, fb_zone, 256, 0, 0)
+ctx_strength = zone_integrate(ff_zone, ctx_zone, fb_zone, 0, 256, 0)
+
+# Binding requires BOTH modalities to be active
+# Minimum activation in each zone
+binding_floor = 30
+
+ff_active = fire_check(ff_strength, binding_floor)
+ctx_active = fire_check(ctx_strength, binding_floor)
+
+if ff_active == 1 do
+  if ctx_active == 1 do
+    # Both active — compute binding strength from geometric mean
+    # (product / normalization approximation using integer math)
+    combined = ff_strength * ctx_strength / 256
+    out_mag = combined * 200 / 1000
+    if out_mag < 20 do
+      out_mag = 20
+    end
+    if out_mag > 200 do
+      out_mag = 200
+    end
+    spike(1, out_mag)
+  else do
+    spike(0, 0)
+  end
+else do
+  spike(0, 0)
+end

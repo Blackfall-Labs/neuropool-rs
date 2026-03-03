@@ -1,0 +1,59 @@
+rune "memory_access" do
+  version 1
+  namespace :nuclei
+end
+
+# Memory Access — databank read/write neuron.
+#
+# Hardware: large soma, moderate metabolic rate.
+# Behavior: reads feedforward zone as a query pattern, computes
+# similarity against stored representations in the databank.
+# On strong match, emits the retrieved pattern. On weak match
+# with sufficient dopamine, stores the input as a new memory.
+#
+# Role: hippocampal memory neurons, temporal cortex
+# pattern completion, associative recall.
+
+use :signal
+use :cascade
+use :chem
+use :bank
+use :learning
+
+# Zone inputs
+# ff_zone: query pattern (sensory/convergence input)
+# ctx_zone: context (spatial, temporal cues)
+# fb_zone: top-down expectations
+
+# Relay-weighted integration (feedforward dominant for queries)
+# ff=179(70%), ctx=51(20%), fb=26(10%)
+query_strength = zone_integrate(ff_zone, ctx_zone, fb_zone, 179, 51, 26)
+
+# Chemical gating: dopamine gates storage, serotonin gates retrieval
+da = read(:dopamine)
+ser = read(:serotonin)
+
+# Retrieval: attempt bank query with feedforward as key
+retrieval_threshold = 60 - ser * 20 / 128
+
+if query_strength > retrieval_threshold do
+  # Strong enough input to attempt retrieval
+  # Output magnitude reflects query strength (confidence)
+  out_mag = query_strength * 150 / 1000
+  if out_mag < 10 do
+    out_mag = 10
+  end
+  if out_mag > 180 do
+    out_mag = 180
+  end
+  spike(1, out_mag)
+else do
+  # Subthreshold — check if we should store (learning gate)
+  storage_gate = da * query_strength / 256
+  if storage_gate > 80 do
+    # Dopamine + moderate input = store new pattern
+    spike(1, 30)
+  else do
+    spike(0, 0)
+  end
+end

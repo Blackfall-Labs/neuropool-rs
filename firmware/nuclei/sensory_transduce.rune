@@ -1,0 +1,65 @@
+rune "sensory_transduce" do
+  version 1
+  namespace :nuclei
+end
+
+# Sensory Transduce — external input transducer.
+#
+# Hardware: Interface::Sensor.
+# Behavior: converts raw sensory buffer values into ternary signals.
+# Feedforward zone carries the sensory data from the buffer.
+# Applies gain control via chemical state — high cortisol
+# suppresses sensory gain (stress narrows perception),
+# norepinephrine boosts gain (arousal sharpens perception).
+#
+# Role: all sensory neurons (text, auditory, visual, somatic).
+# The specific modality is determined by which SensoryBuffer
+# feeds into this neuron's ff_zone, not by this program.
+
+use :signal
+use :cascade
+use :chem
+
+# Sensory input arrives on feedforward zone
+# ff_zone: raw sensory signal from buffer
+# ctx_zone: lateral modulation (habituation, cross-modal)
+# fb_zone: top-down attention/expectation
+
+# Sensory neurons are feedforward-dominant
+# ff=204(80%), ctx=26(10%), fb=26(10%)
+raw_input = zone_integrate(ff_zone, ctx_zone, fb_zone, 204, 26, 26)
+
+# Gain control via chemistry
+ne = read(:norepinephrine)
+cortisol = read(:cortisol)
+
+# NE boosts gain, cortisol suppresses
+gain = 128 + ne * 40 / 128 - cortisol * 30 / 128
+if gain < 40 do
+  gain = 40
+end
+if gain > 220 do
+  gain = 220
+end
+
+# Apply gain to raw input
+output = raw_input * gain / 128
+
+# Determine polarity from sign
+if output > 0 do
+  out_mag = output
+  if out_mag > 255 do
+    out_mag = 255
+  end
+  spike(1, out_mag)
+else do
+  if output < 0 do
+    out_mag = 0 - output
+    if out_mag > 255 do
+      out_mag = 255
+    end
+    spike(-1, out_mag)
+  else do
+    spike(0, 0)
+  end
+end

@@ -237,6 +237,7 @@ dependencies = [
  "image",
  "log",
  "runes-core",
+ "runes-parser",
  "ternary-signal",
 ]
 
@@ -343,6 +344,14 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 name = "runes-core"
 version = "0.1.0"
 source = "git+https://github.com/Blackfall-Labs/runes#3e815c0344f92467f2d1ac8fd5d78c3faeeac261"
+
+[[package]]
+name = "runes-parser"
+version = "0.1.0"
+source = "git+https://github.com/Blackfall-Labs/runes#3e815c0344f92467f2d1ac8fd5d78c3faeeac261"
+dependencies = [
+ "runes-core",
+]
 
 [[package]]
 name = "serde"
