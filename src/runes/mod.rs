@@ -6,5 +6,9 @@
 //! Requires the `runes` feature flag.
 
 mod signal;
+mod learning;
+mod cascade;
 
 pub use signal::SignalModule;
+pub use learning::LearningModule;
+pub use cascade::CascadeModule;

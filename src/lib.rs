@@ -142,4 +142,4 @@ pub use unified::{
 #[cfg(feature = "runes")]
 pub mod runes;
 #[cfg(feature = "runes")]
-pub use runes::SignalModule;
+pub use runes::{SignalModule, LearningModule, CascadeModule};
