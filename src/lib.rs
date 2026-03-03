@@ -137,3 +137,9 @@ pub use unified::{
     UnifiedNeuronIO, UnifiedPool, UnifiedSynapse, UnifiedSynapseStore, VoxelGrid,
     VoxelNeighborhood, VoxelPosition, WiringRules, ZoneBias, ZoneWeights,
 };
+
+// === Runes Modules (feature-gated) ===
+#[cfg(feature = "runes")]
+pub mod runes;
+#[cfg(feature = "runes")]
+pub use runes::SignalModule;
