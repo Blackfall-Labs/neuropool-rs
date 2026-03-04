@@ -115,6 +115,11 @@ end
 # ---------------------------------------------------------------------------
 # Whitematter tracts
 # ---------------------------------------------------------------------------
+# Ascending projection from thalamus to temporal cortex. This is the
+# primary sensory relay pathway — thalamic relay neurons forward
+# brainstem-originated activity to cortical auditory/language areas.
+wire("thalamic_temporal", "thalamus", "temporal", :projection, 40)
+
 # Feedback projection from thalamus back to brainstem. This carries
 # descending modulatory signals — thalamic state influences brainstem
 # arousal and autonomic regulation.

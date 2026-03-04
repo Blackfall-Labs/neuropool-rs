@@ -1,0 +1,177 @@
+rune "temporal" do
+  version 1
+  namespace :neurogen
+end
+
+# Temporal cortex — auditory processing, language comprehension, episodic memory.
+#
+# The temporal lobe is the third region to develop. It receives ascending
+# sensory input from the thalamus (primarily auditory) and houses the
+# hippocampal formation for episodic memory encoding. This is where
+# sensory streams are bound into meaningful representations.
+#
+# This program declares:
+#   - 4 trophic gradients (auditory cortex, wernicke's area, hippocampal, theta)
+#   - 6 differentiation discs (auditory, language, memory, novelty, theta oscillator, inhibitory)
+#   - 2 whitematter tracts (temporal→thalamus feedback, temporal→brainstem projection)
+#
+# Design notes:
+#   - 512 neurons on a 5-layer cortical column (Cortical archetype).
+#     60% pyramidal, 20% interneuron, 5% each gate/relay/oscillator/memory.
+#   - Auditory neurons cluster near the superior temporal gradient and
+#     respond to thalamic relay input (ascending sensory pathway).
+#   - Language neurons (Wernicke's area equivalent) cluster adjacent to
+#     auditory cortex. They receive auditory input and produce abstract
+#     linguistic representations through recurrent pyramidal circuits.
+#   - Hippocampal memory neurons provide episodic encoding. Large soma,
+#     bank-coupled (via memory nuclei), high recurrence.
+#   - Theta oscillators (4-8 Hz) gate memory encoding and retrieval.
+#     Hippocampal theta is the strongest biological correlate of memory
+#     consolidation.
+#   - Novelty detection neurons respond when input patterns don't match
+#     stored expectations — the mismatch signal that drives learning.
+#
+# Success criteria: auditory neurons respond to thalamic relay input.
+# Theta oscillators sustain independently. Memory neurons activate on
+# sustained input. Feedback tract delivers temporal output to thalamus.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 512 neurons at 10 units each = 5120 minimum. Cortical regions are
+# synaptically dense — pyramidal neurons project long-range.
+allocate(120000)
+
+# ---------------------------------------------------------------------------
+# Temporal cortex region
+# ---------------------------------------------------------------------------
+region("temporal") do
+  archetype(:cortical)
+  neuron_count(512)
+
+  # Developmental phases (frames):
+  #   genesis 600        — columnar self-organization, layering
+  #   exposure 2500      — sensory feeding from thalamus, disc pressure
+  #   differentiation 1200 — neurons commit to roles
+  #   crystallization 1200 — structure freezes, plasticity drops
+  phases(600, 2500, 1200, 1200)
+
+  # --- Trophic gradients ---
+
+  # Superior temporal gyrus: primary auditory cortex.
+  # Strong gradient, moderate radius — tight cluster of auditory neurons.
+  secrete("auditory_cortex", 180, 30)
+
+  # Wernicke's area: posterior superior temporal, language comprehension.
+  # Adjacent to auditory cortex, slightly weaker gradient.
+  secrete("wernicke_area", 160, 25)
+
+  # Hippocampal formation: medial temporal lobe, episodic memory.
+  # Strong gradient, tight radius — dense memory encoding cluster.
+  secrete("hippocampal_formation", 170, 25)
+
+  # Theta pacemaker zone: entorhinal cortex area, drives memory rhythm.
+  secrete("theta_pacemaker", 140, 20)
+
+  # --- Differentiation discs ---
+
+  # Sensory transduction neurons: receive external text input directly.
+  # These are the entry point for all text stimuli into the cortex.
+  # Located near auditory cortex (text is processed through the
+  # auditory/language pathway). Low threshold for high sensitivity.
+  differentiate("text_sensory") do
+    near("auditory_cortex")
+    target(:sensory)
+    threshold(15)
+    population_cap(16)
+  end
+
+  # Auditory cortex neurons: receive thalamic sensory relay (feedforward),
+  # produce frequency-specific responses. These are the first cortical
+  # neurons to respond to ascending input.
+  differentiate("auditory_cortex") do
+    near("auditory_cortex")
+    target(:relay)
+    threshold(20)
+    population_cap(15)
+  end
+
+  # Wernicke's area: language comprehension neurons. Pyramidal cells
+  # with strong lateral (context zone) connectivity for recurrent
+  # processing. These neurons bind sequential auditory patterns into
+  # linguistic representations.
+  differentiate("wernicke_neurons") do
+    near("wernicke_area")
+    target(:pyramidal)
+    threshold(25)
+    population_cap(12)
+  end
+
+  # Hippocampal memory neurons: bank-coupled for episodic encoding.
+  # Large soma, high metabolic rate, dense recurrence. These store
+  # and retrieve episode patterns through bank verbs.
+  differentiate("hippocampal_memory") do
+    near("hippocampal_formation")
+    target(:memory)
+    bind_program("memory_access")
+    threshold(30)
+    population_cap(10)
+  end
+
+  # Novelty detection: neurons that fire on pattern mismatch.
+  # Gate neurons with high leak — they respond to unexpected input
+  # (the residual after prediction subtraction). Distributed near
+  # hippocampus to gate memory encoding on novelty.
+  differentiate("novelty_detector") do
+    near("hippocampal_formation")
+    target(:gate)
+    bind_program("novelty_detect")
+    threshold(30)
+    population_cap(8)
+  end
+
+  # Theta oscillators: 4-8 Hz range (125ms-250ms periods).
+  # Hippocampal theta gates memory encoding/retrieval cycles.
+  # Active theta = memory encoding mode. Absent theta = retrieval mode.
+  differentiate("theta_oscillator") do
+    near("theta_pacemaker")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(25)
+    population_cap(6)
+    period_range(125000, 250000)
+  end
+
+  # Inhibitory interneurons: cortical E/I balance.
+  # Distributed evenly across the region. Cortical archetype seeds
+  # 20% interneurons; this disc reinforces inhibition throughout.
+  differentiate("cortical_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(12)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Feedback tract from temporal cortex to thalamus. This carries
+# cortical predictions and modulatory signals back to the thalamic
+# relay, enabling top-down attention and sensory gating.
+wire("temporal_thalamic", "temporal", "thalamus", :association, 40)
+
+# Descending tract from temporal cortex to brainstem. Carries
+# arousal modulation — when temporal cortex is strongly activated
+# (novel stimulus, language processing), it influences brainstem
+# autonomic and arousal systems.
+wire("temporal_brainstem", "temporal", "brainstem", :projection, 25)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()
