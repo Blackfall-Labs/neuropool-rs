@@ -134,6 +134,8 @@ pub struct CascadeEngine {
     pub coincidence_events: u64,
     /// Ternsig triggers emitted this run.
     ternsig_triggers: Vec<TernsigTrigger>,
+    /// Neuron indices that fired during the current run.
+    fired_this_run: Vec<u32>,
 }
 
 impl CascadeEngine {
@@ -151,6 +153,7 @@ impl CascadeEngine {
             predicted_fires: 0,
             coincidence_events: 0,
             ternsig_triggers: Vec::new(),
+            fired_this_run: Vec::new(),
         }
     }
 
@@ -172,6 +175,7 @@ impl CascadeEngine {
             predicted_fires: 0,
             coincidence_events: 0,
             ternsig_triggers: Vec::new(),
+            fired_this_run: Vec::new(),
         }
     }
 
@@ -217,6 +221,16 @@ impl CascadeEngine {
     /// Drain ternsig triggers emitted since last drain.
     pub fn drain_ternsig_triggers(&mut self) -> Vec<TernsigTrigger> {
         std::mem::take(&mut self.ternsig_triggers)
+    }
+
+    /// Drain neuron indices that fired since last drain.
+    ///
+    /// Returns and clears the list of neuron indices that fired during
+    /// `run_until()` or `run_until_with_io()` calls since the last drain.
+    /// Used by region threads to know which neurons to route outbound
+    /// through whitematter tracts.
+    pub fn drain_fired(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.fired_this_run)
     }
 
     // === Network Building ===
@@ -473,6 +487,7 @@ impl CascadeEngine {
     fn fire_neuron(&mut self, idx: usize) {
         let was_predicted = self.neurons[idx].fire(self.sim_time_us);
         self.total_spikes += 1;
+        self.fired_this_run.push(idx as u32);
 
         if was_predicted {
             self.predicted_fires += 1;
@@ -1307,5 +1322,33 @@ mod tests {
             0,
             "oscillators should be skipped by spontaneous firing"
         );
+    }
+
+    #[test]
+    fn drain_fired_returns_indices() {
+        let config = CascadeConfig {
+            coincidence_boost: 0.0,
+            threshold_jitter: 0,
+            ..CascadeConfig::default()
+        };
+        let mut engine = CascadeEngine::new(config);
+        engine.add_neuron(UnifiedNeuron::pyramidal_at(pos(0, 0, 0)));
+        engine.add_neuron(UnifiedNeuron::pyramidal_at(pos(1, 0, 0)));
+        engine.add_neuron(UnifiedNeuron::pyramidal_at(pos(2, 0, 0)));
+
+        // Fire neuron 0 and 2 (not 1)
+        let fire_current = ff_fire_current(&ZoneWeights::PYRAMIDAL);
+        engine.inject_ff(0, fire_current, 100);
+        engine.inject_ff(2, fire_current, 100);
+        engine.run_until(200);
+
+        let fired = engine.drain_fired();
+        assert!(fired.contains(&0), "neuron 0 should have fired");
+        assert!(fired.contains(&2), "neuron 2 should have fired");
+        assert!(!fired.contains(&1), "neuron 1 should not have fired");
+
+        // Second drain should be empty
+        let fired2 = engine.drain_fired();
+        assert!(fired2.is_empty(), "drain_fired should clear after first call");
     }
 }

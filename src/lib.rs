@@ -148,5 +148,6 @@ pub use runes::{
     NeurogenBuilder, TrophicModule, DevelopModule, BudgetModule,
     RegionSpec, GradientSpec, DiscSpec, DiscTarget,
     TractSpec, TractType, PhaseDurations,
-    execute as neurogen_execute, HarnessConfig, IncubatedRegion, NeurogenResult,
+    execute as neurogen_execute, hash_string as neurogen_hash,
+    HarnessConfig, IncubatedRegion, NeurogenResult,
 };

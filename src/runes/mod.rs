@@ -26,5 +26,5 @@ pub use neurogen::{
     NeurogenBuilder, TrophicModule, DevelopModule, BudgetModule,
     RegionSpec, GradientSpec, DiscSpec, DiscTarget,
     TractSpec, TractType, PhaseDurations,
-    execute, HarnessConfig, IncubatedRegion, NeurogenResult,
+    execute, hash_string, HarnessConfig, IncubatedRegion, NeurogenResult,
 };

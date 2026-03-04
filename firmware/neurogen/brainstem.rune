@@ -81,6 +81,7 @@ region("brainstem") do
   differentiate("respiratory_oscillator") do
     near("respiratory_center")
     target(:oscillator)
+    bind_program("pacemaker")
     threshold(25)
     population_cap(12)
     period_range(500000, 2000000)
@@ -92,6 +93,7 @@ region("brainstem") do
   differentiate("cardiac_oscillator") do
     near("cardiac_center")
     target(:oscillator)
+    bind_program("pacemaker")
     threshold(25)
     population_cap(8)
     period_range(800000, 1200000)

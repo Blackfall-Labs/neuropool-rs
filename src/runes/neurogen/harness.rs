@@ -256,7 +256,8 @@ fn apply_disc_to_neuron(neuron: &mut crate::unified::UnifiedNeuron, disc: &DiscS
 }
 
 /// Simple string hash for deterministic gradient → position mapping.
-fn hash_string(s: &str) -> u64 {
+/// Also used to derive nuclei program IDs from program names.
+pub fn hash_string(s: &str) -> u64 {
     let mut h: u64 = 5381;
     for b in s.bytes() {
         h = h.wrapping_mul(33).wrapping_add(b as u64);
@@ -565,15 +566,225 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // Thalamus tests
+    // -----------------------------------------------------------------------
+
+    fn thalamus_spec() -> RegionSpec {
+        let mut spec = RegionSpec::new("thalamus".to_string());
+        spec.archetype = RegionArchetype::Thalamic;
+        spec.neuron_count = 256;
+        spec.phase_durations = PhaseDurations {
+            genesis: 400,
+            exposure: 1500,
+            differentiation: 800,
+            crystallization: 800,
+        };
+
+        spec.gradients.push(GradientSpec {
+            name: "ventral_relay".to_string(),
+            strength: 170,
+            radius: 30,
+        });
+        spec.gradients.push(GradientSpec {
+            name: "reticular_nucleus".to_string(),
+            strength: 150,
+            radius: 35,
+        });
+
+        let mut d1 = DiscSpec::new("thalamic_relay".to_string());
+        d1.near_gradient = Some("ventral_relay".to_string());
+        d1.target = DiscTarget::Relay;
+        d1.threshold = 20;
+        d1.population_cap = 30;
+        spec.discs.push(d1);
+
+        let mut d2 = DiscSpec::new("reticular_gate".to_string());
+        d2.near_gradient = Some("reticular_nucleus".to_string());
+        d2.target = DiscTarget::Gate;
+        d2.threshold = 25;
+        d2.population_cap = 25;
+        spec.discs.push(d2);
+
+        let mut d3 = DiscSpec::new("local_inhibition".to_string());
+        d3.target = DiscTarget::Interneuron;
+        d3.threshold = 20;
+        d3.population_cap = 15;
+        d3.spread = Some("even".to_string());
+        spec.discs.push(d3);
+
+        let mut d4 = DiscSpec::new("spindle_oscillator".to_string());
+        d4.near_gradient = Some("reticular_nucleus".to_string());
+        d4.target = DiscTarget::Oscillator;
+        d4.threshold = 30;
+        d4.population_cap = 5;
+        d4.period_range = Some((100_000, 500_000));
+        spec.discs.push(d4);
+
+        spec
+    }
+
+    #[test]
+    fn thalamus_has_relay_neurons() {
+        let mut builder = NeurogenBuilder::new();
+        builder.regions.push(thalamus_spec());
+
+        let config = HarnessConfig::default();
+        let result = execute(&builder, &config);
+
+        let region = &result.regions[0];
+        assert_eq!(region.name, "thalamus");
+
+        // Disc specializations should transform neurons
+        assert!(
+            region.specialized_count > 0,
+            "thalamus discs should specialize neurons, got 0"
+        );
+
+        // Relay neurons have leak=150 (relay preset)
+        let relay_count = region.pool.neurons.iter()
+            .filter(|n| n.nuclei.leak == 150)
+            .count();
+        assert!(
+            relay_count >= 1,
+            "thalamus should have relay neurons (leak=150), got {}",
+            relay_count
+        );
+
+        // Gate neurons have leak=220 (gate preset)
+        let gate_count = region.pool.neurons.iter()
+            .filter(|n| n.nuclei.leak == 220)
+            .count();
+        assert!(
+            gate_count >= 1,
+            "thalamus should have gate neurons (leak=220), got {}",
+            gate_count
+        );
+    }
+
+    #[test]
+    fn thalamus_inject_relay_responds() {
+        use crate::unified::{CascadeConfig, CascadeEngine, NullUnifiedIO};
+
+        let mut builder = NeurogenBuilder::new();
+        builder.regions.push(thalamus_spec());
+
+        let config = HarnessConfig {
+            seed: 42,
+            incubate_config: IncubateConfig {
+                settling_steps: 100,
+                step_duration_us: 10_000,
+                prune_after_settling: true,
+            },
+        };
+        let mut result = execute(&builder, &config);
+        let region = result.regions.remove(0);
+
+        let mut engine = CascadeEngine::with_network(
+            region.pool.neurons,
+            region.pool.synapses,
+            CascadeConfig::default(),
+        );
+
+        // Inject feedforward current into relay neurons (which have low threshold)
+        // and oscillator-driven activity
+        let mut total_spikes = 0u64;
+        let mut io = NullUnifiedIO;
+        let step_us = 10_000u64;
+        for step in 1..=200u64 {
+            let time_us = step * step_us;
+            engine.advance_to(time_us);
+            engine.check_oscillators();
+            engine.check_spontaneous();
+
+            // Inject external current into first 10 neurons every 50ms
+            if step % 5 == 0 {
+                for i in 0..10u32 {
+                    engine.inject_ff(i, 800, time_us);
+                }
+            }
+
+            let spikes = engine.run_until_with_io(time_us, &mut io);
+            total_spikes += spikes;
+            engine.decay_traces();
+            engine.recover_stamina(step_us);
+        }
+
+        assert!(
+            total_spikes > 0,
+            "thalamus should produce spikes when receiving feedforward input, got 0"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Thalamus Runes end-to-end
+    // -----------------------------------------------------------------------
+
+    fn load_rune_file(name: &str) -> String {
+        let manifest = env!("CARGO_MANIFEST_DIR");
+        let path = format!("{}/firmware/neurogen/{}.rune", manifest, name);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {}: {}", path, e))
+    }
+
+    #[test]
+    fn thalamus_rune_end_to_end() {
+        use runes_parser::{Lexer, Parser};
+        use runes_eval::Evaluator;
+        use runes_core::engine::Engine;
+        use runes_core::value::Value;
+        use crate::runes::neurogen::{TrophicModule, DevelopModule, BudgetModule};
+
+        let source = load_rune_file("thalamus");
+        let tokens = Lexer::new(&source).tokenize().expect("lexer failed");
+        let program = Parser::new(tokens).parse_program().expect("parser failed");
+
+        let engine = Engine::builder()
+            .namespace("neurogen")
+                .module(TrophicModule::new())
+                .module(DevelopModule::new())
+                .module(BudgetModule::new())
+            .build()
+            .expect("engine build failed");
+
+        let mut evaluator = Evaluator::new();
+        evaluator.set_host(NeurogenBuilder::new());
+
+        let result = evaluator
+            .eval_with_engine(&program, &engine)
+            .expect("eval failed");
+
+        assert_eq!(result, Value::Integer(50000), "balance should return full budget");
+
+        let builder = evaluator.take_host::<NeurogenBuilder>()
+            .expect("failed to extract NeurogenBuilder");
+
+        assert_eq!(builder.regions.len(), 1);
+        assert_eq!(builder.regions[0].name, "thalamus");
+        assert_eq!(builder.regions[0].neuron_count, 256);
+        assert_eq!(builder.regions[0].gradients.len(), 2);
+        assert_eq!(builder.regions[0].discs.len(), 4);
+        assert_eq!(builder.tracts.len(), 1);
+        assert_eq!(builder.tracts[0].name, "thalamic_brainstem");
+        assert_eq!(builder.tracts[0].from, "thalamus");
+        assert_eq!(builder.tracts[0].to, "brainstem");
+
+        // Run through harness
+        let config = HarnessConfig::default();
+        let harness_result = execute(&builder, &config);
+
+        assert_eq!(harness_result.regions.len(), 1);
+        let region = &harness_result.regions[0];
+        assert!(!region.pool.neurons.is_empty());
+        assert!(region.specialized_count > 0, "discs should specialize neurons");
+    }
+
+    // -----------------------------------------------------------------------
     // End-to-end Runes integration: brainstem.rune → harness → cascade
     // -----------------------------------------------------------------------
 
     /// Load brainstem.rune from the firmware directory.
     fn load_brainstem_rune() -> String {
-        let manifest = env!("CARGO_MANIFEST_DIR");
-        let path = format!("{}/firmware/neurogen/brainstem.rune", manifest);
-        std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("failed to read {}: {}", path, e))
+        load_rune_file("brainstem")
     }
 
     #[test]

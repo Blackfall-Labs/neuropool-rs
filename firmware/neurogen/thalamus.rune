@@ -1,0 +1,126 @@
+rune "thalamus" do
+  version 1
+  namespace :neurogen
+end
+
+# Thalamus — sensory relay and gating hub.
+#
+# The thalamus is the second region to develop. It serves as the relay
+# station between brainstem/subcortical structures and cortex. Almost
+# all sensory and motor information passes through the thalamus before
+# reaching cortical regions.
+#
+# This program declares:
+#   - 2 trophic gradients (ventral relay nucleus, reticular nucleus)
+#   - 4 differentiation discs (relay, gate, inhibitory, oscillator)
+#   - 1 whitematter tract (feedback to brainstem)
+#
+# Design notes:
+#   - 256 neurons on a flat cluster (Thalamic archetype: 2 z-layers).
+#     Thalamic nuclei are flat, layered structures — not deep volumes.
+#   - Relay neurons (~30%) receive ascending input from brainstem and
+#     forward to cortex. High throughput, low processing.
+#   - Gate neurons (~25%) from the reticular nucleus provide inhibitory
+#     gating — they control WHICH relay signals pass through. This is
+#     the thalamic attention gate.
+#   - Inhibitory interneurons (~15%) provide local E/I balance.
+#   - Small oscillator population (~5%) generates alpha/spindle rhythms
+#     (100-500ms periods = 2-10 Hz). These thalamic oscillations gate
+#     sensory relay during sleep and drowsy states.
+#
+# Success criteria: relay neurons respond to ascending input from
+# brainstem. Gate neurons modulate relay throughput. Feedback tract
+# delivers thalamic output back to brainstem.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 256 neurons at 10 units each = 2560 minimum. Budget headroom for
+# synaptic wiring and structural overhead.
+allocate(50000)
+
+# ---------------------------------------------------------------------------
+# Thalamus region
+# ---------------------------------------------------------------------------
+region("thalamus") do
+  archetype(:thalamic)
+  neuron_count(256)
+
+  # Developmental phases (frames):
+  #   genesis 400        — self-organization
+  #   exposure 1500      — sensors feeding, discs accumulate pressure
+  #   differentiation 800 — neurons transform irreversibly
+  #   crystallization 800 — structure freezes
+  phases(400, 1500, 800, 800)
+
+  # --- Trophic gradients ---
+
+  # Ventral relay nucleus: where ascending sensory fibers terminate.
+  # Strong gradient, moderate radius — concentrated relay cluster.
+  secrete("ventral_relay", 170, 30)
+
+  # Reticular nucleus: thin shell of inhibitory neurons that wraps
+  # the thalamus. Controls gating of relay signals.
+  secrete("reticular_nucleus", 150, 35)
+
+  # --- Differentiation discs ---
+
+  # Relay neurons: high-throughput sensory relay. Receive ascending
+  # input on feedforward zone, forward to cortex. Low threshold for
+  # responsive relay behavior.
+  differentiate("thalamic_relay") do
+    near("ventral_relay")
+    target(:relay)
+    threshold(20)
+    population_cap(30)
+  end
+
+  # Gate neurons: reticular nucleus inhibition. These gate relay
+  # neurons — when active, they suppress relay throughput. This is
+  # the mechanism for thalamic attention gating.
+  differentiate("reticular_gate") do
+    near("reticular_nucleus")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(25)
+    population_cap(25)
+  end
+
+  # Inhibitory interneurons: local braking circuits distributed
+  # evenly. Prevent excitatory runaway in the relay pathways.
+  differentiate("local_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(15)
+    spread(:even)
+  end
+
+  # Thalamic oscillators: alpha/spindle rhythm generators.
+  # 100-500ms periods = 2-10 Hz range. These oscillations modulate
+  # relay gating during sleep spindles and alpha rhythm states.
+  differentiate("spindle_oscillator") do
+    near("reticular_nucleus")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(30)
+    population_cap(5)
+    period_range(100000, 500000)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Feedback projection from thalamus back to brainstem. This carries
+# descending modulatory signals — thalamic state influences brainstem
+# arousal and autonomic regulation.
+wire("thalamic_brainstem", "thalamus", "brainstem", :projection, 40)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()
