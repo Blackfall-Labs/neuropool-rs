@@ -171,6 +171,11 @@ wire("temporal_thalamic", "temporal", "thalamus", :association, 40)
 # autonomic and arousal systems.
 wire("temporal_brainstem", "temporal", "brainstem", :projection, 25)
 
+# Arcuate fasciculus equivalent: temporal→frontal association tract.
+# Carries language comprehension signals from Wernicke's area to Broca's
+# area for speech production, and semantic context to PFC for planning.
+wire("temporal_frontal", "temporal", "frontal", :association, 35)
+
 # ---------------------------------------------------------------------------
 # Budget verification
 # ---------------------------------------------------------------------------

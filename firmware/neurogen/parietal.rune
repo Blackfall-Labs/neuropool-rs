@@ -1,0 +1,137 @@
+rune "parietal" do
+  version 1
+  namespace :neurogen
+end
+
+# Parietal cortex — spatial reasoning, structural binding, attention.
+#
+# The parietal lobe integrates multimodal sensory information into spatial
+# and structural representations. For code understanding, this is where
+# syntactic structure (nesting, scope, indentation) is represented as
+# spatial relationships. It binds "what" (from temporal) with "where"
+# (structural position) into unified representations.
+#
+# This program declares:
+#   - 3 trophic gradients (superior parietal, inferior parietal, precuneus)
+#   - 5 differentiation discs
+#   - 2 whitematter tracts (parietal→frontal, parietal→temporal)
+#
+# Design notes:
+#   - 256 neurons (smaller than frontal/temporal — parietal is more compact).
+#     Cortical archetype, 5-layer columnar organization.
+#   - Superior parietal neurons process spatial/structural relationships.
+#   - Inferior parietal (angular gyrus equivalent) binds multimodal input —
+#     where language, spatial, and attentional streams converge.
+#   - Precuneus neurons support self-referential processing and attention.
+#   - Multimodal binding neurons combine temporal (what) + spatial (where).
+#
+# Success criteria: parietal neurons respond to temporal and thalamic input.
+# Binding neurons fire when both temporal and spatial signals are present.
+# Attention modulation reaches frontal cortex via association tracts.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 256 neurons at 10 units each = 2560 minimum.
+allocate(60000)
+
+# ---------------------------------------------------------------------------
+# Parietal cortex region
+# ---------------------------------------------------------------------------
+region("parietal") do
+  archetype(:cortical)
+  neuron_count(256)
+
+  # Developmental phases:
+  #   genesis 500        — columnar self-organization
+  #   exposure 2000      — multimodal input integration
+  #   differentiation 1000 — neurons commit to binding roles
+  #   crystallization 1000 — structure freezes
+  phases(500, 2000, 1000, 1000)
+
+  # --- Trophic gradients ---
+
+  # Superior parietal lobule: spatial processing, structural reasoning.
+  secrete("superior_parietal", 170, 30)
+
+  # Inferior parietal lobule (angular gyrus): multimodal binding zone.
+  # Where language, spatial, and attention streams converge.
+  secrete("inferior_parietal", 160, 30)
+
+  # Precuneus: self-referential processing, episodic recall, attention.
+  secrete("precuneus", 140, 25)
+
+  # --- Differentiation discs ---
+
+  # Spatial reasoning neurons: process structural relationships.
+  # Pyramidal cells with strong context zone connectivity for
+  # integrating hierarchical structure (nesting, scope, tree shapes).
+  differentiate("spatial_reasoning") do
+    near("superior_parietal")
+    target(:pyramidal)
+    threshold(25)
+    population_cap(12)
+  end
+
+  # Multimodal binding neurons: combine temporal + spatial signals.
+  # Gate neurons that require coincident input from multiple zones
+  # to fire — true binding through coincidence detection.
+  differentiate("multimodal_bind") do
+    near("inferior_parietal")
+    target(:gate)
+    bind_program("multimodal_bind")
+    threshold(30)
+    population_cap(8)
+  end
+
+  # Attention neurons: salience computation. Relay neurons that
+  # forward high-salience signals to frontal cortex for executive
+  # processing. Low threshold for rapid response.
+  differentiate("attention_relay") do
+    near("precuneus")
+    target(:relay)
+    threshold(20)
+    population_cap(10)
+  end
+
+  # Beta oscillators: 13-30 Hz (33ms-77ms periods).
+  # Motor readiness rhythm. Active beta = maintained state.
+  # Beta suppression = preparing for change/action.
+  differentiate("beta_oscillator") do
+    near("superior_parietal")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(25)
+    population_cap(4)
+    period_range(33000, 77000)
+  end
+
+  # Cortical inhibition: E/I balance.
+  differentiate("cortical_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(10)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Parietal→frontal association: attention and spatial context.
+# Feeds structural/spatial representations to frontal planning circuits.
+wire("parietal_frontal", "parietal", "frontal", :association, 35)
+
+# Parietal→temporal association: binding feedback.
+# Sends structural context back to temporal for pattern matching
+# that is structure-aware (e.g., "this token at this nesting level").
+wire("parietal_temporal", "parietal", "temporal", :association, 30)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()

@@ -1,0 +1,173 @@
+rune "frontal" do
+  version 1
+  namespace :neurogen
+end
+
+# Frontal cortex — planning, reasoning, language production, motor output.
+#
+# The frontal lobe is the executive center. It receives processed sensory
+# input from temporal and parietal cortices via thalamic relay and direct
+# association tracts, and produces deliberate output — language, motor
+# commands, and top-down modulatory signals.
+#
+# This program declares:
+#   - 4 trophic gradients (dorsolateral PFC, Broca's, premotor, orbital)
+#   - 7 differentiation discs
+#   - 3 whitematter tracts (frontal→temporal, frontal→thalamus, frontal→brainstem)
+#
+# Design notes:
+#   - 512 neurons on a 5-layer cortical column (Cortical archetype).
+#   - Dorsolateral PFC neurons maintain working memory through sustained
+#     recurrent activity. High pyramidal density for long-range projection.
+#   - Broca's area produces language output — the motor side of language
+#     (Wernicke's in temporal is the comprehension side).
+#   - Premotor neurons integrate planning output into motor commands.
+#   - Executive gate neurons from orbital/medial PFC provide inhibitory
+#     control — suppressing inappropriate responses. This is the "brake."
+#   - Alpha oscillators (8-13 Hz) gate idle state and attention switching.
+#
+# Success criteria: frontal neurons respond to temporal/thalamic input.
+# Working memory pyramidals sustain activity beyond stimulus offset.
+# Motor neurons fire when planning circuits reach decision threshold.
+# Executive gates modulate output — not everything passes through.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 512 neurons, cortical density. Frontal cortex is metabolically expensive —
+# it has the highest per-neuron energy cost of any brain region.
+allocate(150000)
+
+# ---------------------------------------------------------------------------
+# Frontal cortex region
+# ---------------------------------------------------------------------------
+region("frontal") do
+  archetype(:cortical)
+  neuron_count(512)
+
+  # Developmental phases:
+  #   genesis 700        — columnar self-organization (frontal matures last)
+  #   exposure 3000      — prolonged exposure (frontal needs more experience)
+  #   differentiation 1500 — neurons commit to executive roles
+  #   crystallization 1500 — structure freezes
+  phases(700, 3000, 1500, 1500)
+
+  # --- Trophic gradients ---
+
+  # Dorsolateral prefrontal cortex: working memory, planning, reasoning.
+  # The strongest gradient — this is where the bulk of executive function lives.
+  secrete("dorsolateral_pfc", 190, 35)
+
+  # Broca's area: language production, speech motor planning.
+  # Adjacent to premotor cortex, tightly coupled to Wernicke's via arcuate fasciculus.
+  secrete("broca_area", 170, 25)
+
+  # Premotor cortex: motor planning, action sequencing.
+  # Receives from PFC (what to do) and outputs to motor neurons (how to do it).
+  secrete("premotor_cortex", 160, 30)
+
+  # Orbital/medial PFC: inhibitory control, decision evaluation.
+  # The "stop" signal — evaluates whether planned actions should proceed.
+  secrete("orbital_pfc", 140, 25)
+
+  # --- Differentiation discs ---
+
+  # Working memory neurons: sustained recurrent pyramidal circuits.
+  # These maintain representations active beyond stimulus offset.
+  # High threshold (harder to activate) but once active, self-sustaining
+  # through lateral recurrence.
+  differentiate("working_memory") do
+    near("dorsolateral_pfc")
+    target(:pyramidal)
+    threshold(30)
+    population_cap(15)
+  end
+
+  # Planning neurons: integrate multiple inputs, compute sequences.
+  # Memory-coupled for accessing learned procedures and patterns.
+  differentiate("planning_memory") do
+    near("dorsolateral_pfc")
+    target(:memory)
+    bind_program("memory_access")
+    threshold(30)
+    population_cap(8)
+  end
+
+  # Broca's area: language production neurons. Pyramidal cells that
+  # receive from Wernicke's (temporal) and produce motor speech plans.
+  differentiate("broca_neurons") do
+    near("broca_area")
+    target(:pyramidal)
+    threshold(25)
+    population_cap(12)
+  end
+
+  # Motor output neurons: final common path for frontal commands.
+  # These receive from premotor planning and output to brainstem/spinal.
+  differentiate("motor_output") do
+    near("premotor_cortex")
+    target(:motor)
+    threshold(25)
+    population_cap(8)
+  end
+
+  # Executive gate neurons: inhibitory control from orbital PFC.
+  # These gate output — when active, they suppress motor/language output.
+  # High chemical sensitivity (responsive to DA/5-HT modulation).
+  differentiate("executive_gate") do
+    near("orbital_pfc")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(25)
+    population_cap(10)
+  end
+
+  # Alpha oscillators: 8-13 Hz (77ms-125ms periods).
+  # Cortical idle rhythm. Active alpha = "standby." Alpha suppression
+  # (desynchronization) = active processing. These provide the temporal
+  # framework for attention switching.
+  differentiate("alpha_oscillator") do
+    near("dorsolateral_pfc")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(25)
+    population_cap(5)
+    period_range(77000, 125000)
+  end
+
+  # Cortical inhibition: E/I balance. Frontal cortex needs strong
+  # inhibition to prevent impulsive output.
+  differentiate("cortical_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(12)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Arcuate fasciculus equivalent: frontal→temporal association tract.
+# Carries language production signals from Broca's to Wernicke's area,
+# and planning context from PFC to temporal memory systems.
+wire("frontal_temporal", "frontal", "temporal", :association, 40)
+
+# Frontal→thalamus projection: top-down modulatory control.
+# PFC modulates thalamic relay gating — this is how frontal attention
+# controls what sensory information reaches cortex.
+wire("frontal_thalamic", "frontal", "thalamus", :projection, 30)
+
+# Descending motor pathway: frontal→brainstem.
+# Motor output from premotor/motor cortex descends to brainstem
+# for autonomic modulation and motor execution.
+wire("frontal_brainstem", "frontal", "brainstem", :projection, 25)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()

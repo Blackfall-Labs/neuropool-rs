@@ -120,6 +120,14 @@ end
 # brainstem-originated activity to cortical auditory/language areas.
 wire("thalamic_temporal", "thalamus", "temporal", :projection, 40)
 
+# Ascending projection to frontal cortex. Thalamic relay forwards
+# arousal and sensory state to prefrontal executive circuits.
+wire("thalamic_frontal", "thalamus", "frontal", :projection, 35)
+
+# Ascending projection to parietal cortex. Thalamic relay forwards
+# sensory state for spatial/structural processing.
+wire("thalamic_parietal", "thalamus", "parietal", :projection, 30)
+
 # Feedback projection from thalamus back to brainstem. This carries
 # descending modulatory signals — thalamic state influences brainstem
 # arousal and autonomic regulation.
