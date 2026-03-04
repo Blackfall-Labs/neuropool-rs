@@ -167,6 +167,15 @@ wire("frontal_thalamic", "frontal", "thalamus", :projection, 30)
 # for autonomic modulation and motor execution.
 wire("frontal_brainstem", "frontal", "brainstem", :projection, 25)
 
+# Corticostriatal projection: frontal→basal_ganglia.
+# Executive cortex sends action plans to striatum for selection/gating.
+# This is the primary input to the action selection circuit.
+wire("frontal_bg", "frontal", "basal_ganglia", :projection, 35)
+
+# Corticopontine → cerebellar projection: frontal→cerebellum.
+# Motor and planning output sent to cerebellum for timing refinement.
+wire("frontal_cerebellar", "frontal", "cerebellum", :projection, 25)
+
 # ---------------------------------------------------------------------------
 # Budget verification
 # ---------------------------------------------------------------------------

@@ -1,0 +1,147 @@
+rune "cerebellum" do
+  version 1
+  namespace :neurogen
+end
+
+# Cerebellum — timing, coordination, prediction, error correction.
+#
+# The cerebellum contains more neurons than the rest of the brain combined
+# (in biology). It processes timing, sequencing, and error correction with
+# extreme precision. Motor commands pass through it for refinement.
+#
+# For code understanding:
+#   - Timing: precise sequencing of token generation
+#   - Error correction: syntax error detection and correction
+#   - Pattern prediction: predicting next token in a sequence
+#   - Procedural memory: automated code patterns (idioms, boilerplate)
+#
+# This program declares:
+#   - 3 trophic gradients (granule layer, Purkinje layer, deep nuclei)
+#   - 5 differentiation discs
+#   - 3 whitematter tracts
+#
+# Design notes:
+#   - 256 neurons, cerebellar archetype (high interneuron density,
+#     precise timing circuits, fast oscillations).
+#   - Granule cells (~20%) receive mossy fiber input from pontine nuclei
+#     (which relay cortical output). Massively divergent — each granule
+#     cell contacts many Purkinje cells.
+#   - Purkinje cells (~12%) are the primary computational neurons.
+#     Large inhibitory cells with extensive dendritic trees. They
+#     receive parallel fiber (granule) and climbing fiber (error) input.
+#   - Deep cerebellar nuclei (~10%) are the output stage. Purkinje cells
+#     inhibit them; disinhibition = cerebellar output to thalamus.
+#   - Fast oscillators: 25-40 Hz beta/gamma range for precise timing.
+#
+# Success criteria: granule cells respond to cortical input via pontine
+# relay. Purkinje cells modulate deep nuclei output. Cerebellar output
+# reaches thalamus for relay back to cortex.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 256 neurons at 10 units each = 2560 minimum.
+allocate(60000)
+
+# ---------------------------------------------------------------------------
+# Cerebellum region
+# ---------------------------------------------------------------------------
+region("cerebellum") do
+  archetype(:cerebellar)
+  neuron_count(256)
+
+  # Developmental phases:
+  #   genesis 400        — cerebellar folding organization
+  #   exposure 1500      — motor and sensory input calibration
+  #   differentiation 800 — neurons commit to granule/Purkinje roles
+  #   crystallization 800 — structure freezes
+  phases(400, 1500, 800, 800)
+
+  # --- Trophic gradients ---
+
+  # Granule cell layer: input expansion. Dense, small neurons.
+  secrete("granule_layer", 180, 35)
+
+  # Purkinje cell layer: computation. Large inhibitory projection neurons.
+  secrete("purkinje_layer", 160, 25)
+
+  # Deep cerebellar nuclei: output stage.
+  secrete("deep_nuclei", 140, 20)
+
+  # --- Differentiation discs ---
+
+  # Granule cells: input expansion layer. Small relay neurons that
+  # receive mossy fiber input and distribute to Purkinje cells
+  # via parallel fibers.
+  differentiate("granule_cell") do
+    near("granule_layer")
+    target(:relay)
+    threshold(15)
+    population_cap(20)
+  end
+
+  # Purkinje cells: large inhibitory computational neurons.
+  # Receive parallel fibers (granule) + climbing fibers (error).
+  # Gate neurons — they learn precise timing through error correction.
+  differentiate("purkinje_cell") do
+    near("purkinje_layer")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(25)
+    population_cap(12)
+  end
+
+  # Deep nuclear neurons: output relay. Tonically active.
+  # Purkinje inhibition sculpts their output pattern.
+  differentiate("deep_nuclear") do
+    near("deep_nuclei")
+    target(:relay)
+    threshold(20)
+    population_cap(10)
+  end
+
+  # Fast oscillators: 25-40 Hz (25ms-40ms periods).
+  # Cerebellar timing precision rhythm.
+  differentiate("cerebellar_oscillator") do
+    near("purkinje_layer")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(25)
+    population_cap(5)
+    period_range(25000, 40000)
+  end
+
+  # Inhibitory interneurons: basket cells, stellate cells.
+  differentiate("cerebellar_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(10)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Cerebellum → thalamus: primary output pathway.
+# Deep nuclear output relayed through thalamus to cortex.
+# This is how cerebellar timing corrections reach executive circuits.
+wire("cerebellar_thalamic", "cerebellum", "thalamus", :projection, 35)
+
+# Cerebellum → brainstem: descending motor coordination.
+# Cerebellar output modulates brainstem motor nuclei for
+# movement coordination and autonomic timing.
+wire("cerebellar_brainstem", "cerebellum", "brainstem", :projection, 25)
+
+# Cerebellum → frontal: direct cerebello-cortical feedback.
+# Error correction signals reach frontal planning circuits.
+wire("cerebellar_frontal", "cerebellum", "frontal", :projection, 25)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()

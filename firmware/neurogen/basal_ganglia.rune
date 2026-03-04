@@ -1,0 +1,149 @@
+rune "basal_ganglia" do
+  version 1
+  namespace :neurogen
+end
+
+# Basal ganglia — action selection, reward learning, habit formation.
+#
+# The basal ganglia are subcortical nuclei that gate cortical output.
+# They implement action selection through competitive inhibition:
+# the direct pathway (go) vs indirect pathway (no-go). Dopamine
+# modulates which pathway dominates — reward strengthens direct,
+# punishment strengthens indirect.
+#
+# For code understanding:
+#   - Action selection: choosing which code pattern to apply
+#   - Habit formation: frequently-used patterns become automatic
+#   - Error suppression: inhibiting incorrect completions
+#   - Reward learning: DA signals from successful pattern matching
+#
+# This program declares:
+#   - 3 trophic gradients (striatum, globus pallidus, subthalamic)
+#   - 5 differentiation discs
+#   - 3 whitematter tracts
+#
+# Design notes:
+#   - 256 neurons, basal ganglia archetype (subcortical, high
+#     inhibitory density, DA-sensitive).
+#   - Striatal medium spiny neurons (~25%) are the input stage.
+#     They receive cortical glutamatergic input and are heavily
+#     modulated by dopamine. D1 = direct pathway, D2 = indirect.
+#   - Pallidal neurons (~15%) are tonically active inhibitory gates.
+#     They suppress thalamic relay by default — disinhibition is
+#     the mechanism of action selection.
+#   - Subthalamic neurons (~10%) provide the hyperdirect pathway —
+#     rapid global inhibition that prevents premature responses.
+#
+# Success criteria: striatal neurons respond to cortical input.
+# Pallidal gates modulate thalamic relay. DA levels shift the
+# balance between direct and indirect pathways.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 256 neurons at 10 units each = 2560 minimum.
+allocate(60000)
+
+# ---------------------------------------------------------------------------
+# Basal ganglia region
+# ---------------------------------------------------------------------------
+region("basal_ganglia") do
+  archetype(:basal_ganglia)
+  neuron_count(256)
+
+  # Developmental phases:
+  #   genesis 400        — subcortical self-organization
+  #   exposure 1500      — cortical input drives striatal tuning
+  #   differentiation 800 — neurons commit to direct/indirect roles
+  #   crystallization 800 — structure freezes
+  phases(400, 1500, 800, 800)
+
+  # --- Trophic gradients ---
+
+  # Striatum (caudate + putamen): input stage, DA-modulated.
+  # Strongest gradient — most neurons are striatal.
+  secrete("striatum", 180, 35)
+
+  # Globus pallidus: tonically inhibitory output stage.
+  secrete("globus_pallidus", 150, 25)
+
+  # Subthalamic nucleus: excitatory drive for global inhibition.
+  secrete("subthalamic", 140, 20)
+
+  # --- Differentiation discs ---
+
+  # Striatal medium spiny neurons (MSNs): the main input.
+  # High DA sensitivity — reward/punishment modulates behavior.
+  # Gate neurons that learn what cortical patterns to select.
+  differentiate("striatal_msn") do
+    near("striatum")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(20)
+    population_cap(25)
+  end
+
+  # Pallidal output neurons: tonically active inhibitory gates.
+  # Default state is ON (inhibiting thalamus). Striatal input
+  # disinhibits them, releasing thalamic relay.
+  differentiate("pallidal_gate") do
+    near("globus_pallidus")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(25)
+    population_cap(15)
+  end
+
+  # Subthalamic excitatory neurons: the "brake" signal.
+  # Rapid global inhibition via hyperdirect pathway. Prevents
+  # premature action selection.
+  differentiate("subthalamic_excitatory") do
+    near("subthalamic")
+    target(:relay)
+    threshold(25)
+    population_cap(10)
+  end
+
+  # Low-frequency oscillators: 4-8 Hz theta band.
+  # Basal ganglia theta modulates action initiation timing.
+  differentiate("bg_oscillator") do
+    near("striatum")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(25)
+    population_cap(5)
+    period_range(125000, 250000)
+  end
+
+  # Inhibitory interneurons: local circuit regulation.
+  differentiate("bg_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(10)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Basal ganglia → thalamus: the primary output pathway.
+# Pallidal inhibition of thalamic relay — disinhibition = action selection.
+wire("bg_thalamic", "basal_ganglia", "thalamus", :projection, 35)
+
+# Basal ganglia → frontal: direct feedback to executive cortex.
+# Carries action selection results back to frontal planning circuits.
+wire("bg_frontal", "basal_ganglia", "frontal", :projection, 30)
+
+# Basal ganglia → brainstem: descending motor gating.
+# Modulates brainstem motor output and autonomic responses.
+wire("bg_brainstem", "basal_ganglia", "brainstem", :projection, 20)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()
