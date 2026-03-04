@@ -763,12 +763,13 @@ mod tests {
         assert_eq!(builder.regions[0].neuron_count, 256);
         assert_eq!(builder.regions[0].gradients.len(), 2);
         assert_eq!(builder.regions[0].discs.len(), 4);
-        assert_eq!(builder.tracts.len(), 4);
-        // Verify all 4 tracts exist (ascending to temporal/frontal/parietal + feedback to brainstem)
+        assert_eq!(builder.tracts.len(), 5);
+        // Verify all 5 tracts exist (ascending to cortices + feedback to brainstem)
         let tract_names: Vec<&str> = builder.tracts.iter().map(|t| t.name.as_str()).collect();
         assert!(tract_names.contains(&"thalamic_temporal"));
         assert!(tract_names.contains(&"thalamic_frontal"));
         assert!(tract_names.contains(&"thalamic_parietal"));
+        assert!(tract_names.contains(&"thalamic_occipital"));
         assert!(tract_names.contains(&"thalamic_brainstem"));
 
         // Run through harness

@@ -128,6 +128,10 @@ wire("thalamic_frontal", "thalamus", "frontal", :projection, 35)
 # sensory state for spatial/structural processing.
 wire("thalamic_parietal", "thalamus", "parietal", :projection, 30)
 
+# Ascending projection to occipital cortex (LGN → V1 equivalent).
+# Thalamic relay forwards visual sensory state to primary visual cortex.
+wire("thalamic_occipital", "thalamus", "occipital", :projection, 35)
+
 # Feedback projection from thalamus back to brainstem. This carries
 # descending modulatory signals — thalamic state influences brainstem
 # arousal and autonomic regulation.

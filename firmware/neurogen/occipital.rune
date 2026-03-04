@@ -1,0 +1,155 @@
+rune "occipital" do
+  version 1
+  namespace :neurogen
+end
+
+# Occipital cortex — visual processing hierarchy (V1 → V2 → V4).
+#
+# The occipital lobe is the primary visual cortex. It processes visual
+# input through a hierarchical pipeline: V1 detects edges and orientation,
+# V2 extracts contours and texture, V4 processes color and complex form.
+#
+# For code understanding, the visual system handles:
+#   - Character recognition (glyph → symbol mapping)
+#   - Syntax highlighting (color/contrast as salience)
+#   - Spatial layout (indentation, alignment, block structure)
+#   - Code structure as visual pattern (nested braces, alignment)
+#
+# This program declares:
+#   - 3 trophic gradients (V1 primary, V2 secondary, V4 color/form)
+#   - 6 differentiation discs
+#   - 2 whitematter tracts (dorsal → parietal, ventral → temporal)
+#
+# Design notes:
+#   - 256 neurons, cortical archetype, 5-layer columnar organization.
+#   - V1 neurons (~15%) are edge/orientation selective — high spatial
+#     frequency, small receptive fields, rapid response.
+#   - V2 neurons (~12%) integrate V1 output into contour representations.
+#   - V4 neurons (~8%) respond to complex form and visual binding.
+#   - Visual sensory neurons (~10%) receive external visual input.
+#   - Gamma oscillators (30-80 Hz) bind features into unified percepts.
+#     This is the visual binding frequency.
+#
+# Success criteria: visual sensory neurons receive input. V1/V2/V4
+# hierarchy shows increasing response latency (V1 first, V4 last).
+# Dorsal stream reaches parietal, ventral stream reaches temporal.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 256 neurons at 10 units each = 2560 minimum.
+allocate(60000)
+
+# ---------------------------------------------------------------------------
+# Occipital cortex region
+# ---------------------------------------------------------------------------
+region("occipital") do
+  archetype(:cortical)
+  neuron_count(256)
+
+  # Developmental phases:
+  #   genesis 400        — columnar self-organization (V1 matures early)
+  #   exposure 1500      — visual input drives feature selectivity
+  #   differentiation 800 — neurons commit to orientation/form roles
+  #   crystallization 800 — structure freezes
+  phases(400, 1500, 800, 800)
+
+  # --- Trophic gradients ---
+
+  # V1 primary visual cortex: edge detection, orientation selectivity.
+  # Strongest gradient — V1 is the largest visual area.
+  secrete("v1_primary", 180, 30)
+
+  # V2 secondary visual cortex: contour integration, texture processing.
+  secrete("v2_secondary", 160, 25)
+
+  # V4 ventral stream: color, complex form, pattern recognition.
+  secrete("v4_form", 140, 25)
+
+  # --- Differentiation discs ---
+
+  # Visual sensory neurons: receive external visual input.
+  # Low threshold for rapid sensory response.
+  differentiate("visual_sensory") do
+    near("v1_primary")
+    target(:sensory)
+    threshold(15)
+    population_cap(10)
+  end
+
+  # V1 edge detectors: orientation-selective pyramidal cells.
+  # Small receptive fields, fast response, high spatial frequency.
+  differentiate("v1_edge_detector") do
+    near("v1_primary")
+    target(:pyramidal)
+    threshold(20)
+    population_cap(15)
+  end
+
+  # V2 contour integrators: combine V1 edge output into contour
+  # representations. Wider receptive fields than V1.
+  differentiate("v2_contour") do
+    near("v2_secondary")
+    target(:pyramidal)
+    threshold(25)
+    population_cap(12)
+  end
+
+  # V4 form neurons: complex pattern and shape processing.
+  # Gate neurons that require coincident V2 input to fire.
+  differentiate("v4_form_bind") do
+    near("v4_form")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(30)
+    population_cap(8)
+  end
+
+  # Gamma oscillators: 30-80 Hz (12.5ms-33ms periods).
+  # Visual binding frequency. Active gamma = feature integration.
+  # Gamma synchrony between V1/V2/V4 neurons binds separate features
+  # into a unified visual percept.
+  differentiate("gamma_oscillator") do
+    near("v1_primary")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(25)
+    population_cap(5)
+    period_range(12500, 33000)
+  end
+
+  # Cortical inhibition: E/I balance.
+  differentiate("cortical_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(10)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Dorsal stream: occipital → parietal. "Where" pathway.
+# Carries spatial/motion information for spatial processing,
+# structural layout, and attention guidance.
+wire("occipital_parietal", "occipital", "parietal", :projection, 35)
+
+# Ventral stream: occipital → temporal. "What" pathway.
+# Carries object/form information for recognition, categorization,
+# and language mapping (visual word form → Wernicke's).
+wire("occipital_temporal", "occipital", "temporal", :projection, 35)
+
+# Feedback from occipital to thalamus (LGN equivalent).
+# Visual cortex modulates thalamic relay of visual information —
+# top-down attention to visual input.
+wire("occipital_thalamic", "occipital", "thalamus", :projection, 25)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()
