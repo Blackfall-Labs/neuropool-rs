@@ -1,0 +1,205 @@
+rune "hippocampus" do
+  version 1
+  namespace :neurogen
+end
+
+# Hippocampus — episodic memory formation and spatial mapping.
+#
+# The hippocampus is the brain's memory gateway. It converts fleeting
+# sensory experience into durable episodic memories. Unlike neocortex
+# (6-layer columns), hippocampus is allocortex with a unique pipeline
+# topology: DG→CA3→CA1→EC (entorhinal cortex output).
+#
+# This program declares:
+#   - 4 trophic gradients (dentate_gyrus, ca3_recurrent, ca1_output, entorhinal)
+#   - 7 differentiation discs
+#   - 4 whitematter tracts
+#
+# Design notes:
+#   - 256 neurons on Hippocampal archetype (4 z-layers: DG, CA3, CA1, EC).
+#     Pipeline connectivity: DG→CA3→CA1→EC (trisynaptic pathway).
+#     Dense CA3 recurrence (autoassociative pattern completion).
+#   - Dentate gyrus is the pattern separator — sparse coding from dense
+#     entorhinal input. High threshold, low activation = orthogonal codes.
+#   - CA3 is the autoassociative memory — dense recurrence lets partial
+#     cues complete full patterns. Memory neurons here store/retrieve via
+#     databank. This is where engrams physically live.
+#   - CA1 is the comparator/output — compares CA3 retrieval against
+#     direct entorhinal input. Mismatch = novelty signal. Match = memory
+#     confirmation routed to neocortex.
+#   - Theta oscillators (4-8 Hz) gate the encode/retrieve cycle.
+#     Theta peak = encoding mode (DG→CA3 pathway dominant).
+#     Theta trough = retrieval mode (CA3→CA1 pathway dominant).
+#   - Sharp-wave ripples (fast oscillator bursts) during low-theta
+#     compress temporal sequences for cortical consolidation.
+#
+# Success criteria: theta oscillators sustain. CA3 memory neurons respond
+# to inbound temporal/thalamic input. CA1 novelty detection fires on
+# pattern mismatch. Tracts carry hippocampal output to temporal and
+# frontal cortex for memory-guided cognition.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 256 neurons. Hippocampal memory neurons are metabolically expensive
+# (large soma, bank-coupled, high recurrence). Dense CA3 wiring costs more
+# per neuron than typical cortical wiring.
+allocate(80000)
+
+# ---------------------------------------------------------------------------
+# Hippocampus region
+# ---------------------------------------------------------------------------
+region("hippocampus") do
+  archetype(:hippocampal)
+  neuron_count(256)
+
+  # Developmental phases (frames):
+  #   genesis 500        — pipeline topology self-organizes by z-layer
+  #   exposure 2000      — temporal/thalamic input drives disc pressure
+  #   differentiation 1000 — neurons commit: DG sparse, CA3 memory, CA1 output
+  #   crystallization 1000 — structure freezes, plasticity preserved in CA3
+  phases(500, 2000, 1000, 1000)
+
+  # --- Trophic gradients ---
+
+  # Dentate gyrus: sparse coding input layer. Strong gradient, tight radius.
+  # DG neurons have very high threshold — only strongly distinct inputs
+  # activate them, producing orthogonal population codes.
+  secrete("dentate_gyrus", 180, 25)
+
+  # CA3 autoassociative: dense recurrent memory store. Strong gradient.
+  # CA3 neurons connect densely to each other (recurrent collaterals).
+  # This is where pattern completion happens — partial cue → full memory.
+  secrete("ca3_recurrent", 170, 30)
+
+  # CA1 output comparator: receives CA3 + direct entorhinal. Moderate.
+  # Compares retrieved pattern (from CA3) against direct sensory input
+  # (from entorhinal). Mismatch triggers novelty. Match triggers output.
+  secrete("ca1_output", 160, 25)
+
+  # Entorhinal interface: gateway between hippocampus and neocortex.
+  # This is the bidirectional bridge — all cortical input/output routes
+  # through entorhinal cortex.
+  secrete("entorhinal_interface", 150, 30)
+
+  # --- Differentiation discs ---
+
+  # Dentate granule cells: sparse pattern separators.
+  # High threshold makes them hard to fire — only strongly distinct
+  # inputs activate them. This is pattern separation: similar inputs
+  # produce dissimilar DG representations, preventing interference.
+  # Relay type: they transform and forward, not compute recurrently.
+  differentiate("dentate_granule") do
+    near("dentate_gyrus")
+    target(:relay)
+    threshold(40)
+    population_cap(12)
+  end
+
+  # CA3 memory neurons: autoassociative pattern completion.
+  # Bank-coupled for engram storage/retrieval. Dense recurrence in
+  # the hippocampal archetype ensures CA3→CA3 connections form
+  # (context zone = same z-layer lateral). This is the engram substrate.
+  differentiate("ca3_memory") do
+    near("ca3_recurrent")
+    target(:memory)
+    bind_program("memory_access")
+    threshold(25)
+    population_cap(18)
+  end
+
+  # CA3 gate neurons: learned gating within the recurrent network.
+  # These learn to selectively gate which patterns propagate through
+  # CA3 recurrence — preventing catastrophic interference between
+  # stored memories.
+  differentiate("ca3_gate") do
+    near("ca3_recurrent")
+    target(:gate)
+    bind_program("selective_gate")
+    threshold(30)
+    population_cap(8)
+  end
+
+  # CA1 novelty detectors: compare CA3 retrieval vs direct input.
+  # Fire strongly on mismatch (pattern not in memory = novel).
+  # Fire weakly on match (pattern recognized = familiar).
+  # Novelty signal gates encoding: novel events get stored, familiar
+  # events get suppressed (repetition suppression).
+  differentiate("ca1_novelty") do
+    near("ca1_output")
+    target(:gate)
+    bind_program("novelty_detect")
+    threshold(30)
+    population_cap(10)
+  end
+
+  # Theta oscillators: 4-8 Hz gating rhythm for encode/retrieve.
+  # Hippocampal theta is the strongest neural correlate of memory.
+  # Peak phase: DG→CA3 (encoding). Trough phase: CA3→CA1 (retrieval).
+  # Period 125-250ms = 4-8 Hz theta band.
+  differentiate("theta_oscillator") do
+    near("entorhinal_interface")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(20)
+    population_cap(8)
+    period_range(125000, 250000)
+  end
+
+  # Sharp-wave ripple generators: fast bursts during low-theta.
+  # Compress temporal sequences for cortical replay/consolidation.
+  # 100-250 Hz range (4-10ms periods). Fire in coordinated bursts
+  # that replay recent experience at 5-20x real-time speed.
+  differentiate("ripple_oscillator") do
+    near("ca3_recurrent")
+    target(:oscillator)
+    bind_program("pacemaker")
+    threshold(30)
+    population_cap(5)
+    period_range(4000, 10000)
+  end
+
+  # Inhibitory interneurons: E/I balance across all layers.
+  # Hippocampal archetype seeds 15% interneurons. This disc
+  # reinforces inhibition, especially in DG (basket cells that
+  # enforce sparse coding) and CA3 (prevent runaway recurrence).
+  differentiate("hippocampal_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(10)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Hippocampus→temporal: episodic memory output to temporal cortex.
+# Carries retrieved memories and novelty signals to the parahippocampal
+# and perirhinal regions of temporal cortex for semantic integration.
+wire("hippocampal_temporal", "hippocampus", "temporal", :association, 40)
+
+# Hippocampus→frontal: memory-guided planning and decision making.
+# Prospective memory: hippocampus replays past episodes to frontal
+# cortex, which uses them to simulate future scenarios. This is the
+# neural basis of planning from experience.
+wire("hippocampal_frontal", "hippocampus", "frontal", :association, 30)
+
+# Hippocampus→thalamus: re-entrant pathway through anterior thalamus.
+# Part of the Papez circuit. Hippocampal output reaches thalamus for
+# broadcast back to cortex, enabling memory-driven cortical reactivation.
+wire("hippocampal_thalamic", "hippocampus", "thalamus", :projection, 25)
+
+# Hippocampus→brainstem: emotional/autonomic memory responses.
+# Strong hippocampal activation (e.g., recognition of threat context)
+# drives brainstem autonomic output — the "gut feeling" of memory.
+wire("hippocampal_brainstem", "hippocampus", "brainstem", :projection, 20)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+balance()

@@ -132,6 +132,11 @@ wire("thalamic_parietal", "thalamus", "parietal", :projection, 30)
 # Thalamic relay forwards visual sensory state to primary visual cortex.
 wire("thalamic_occipital", "thalamus", "occipital", :projection, 35)
 
+# Ascending projection to hippocampus (anterior thalamic nuclei).
+# Part of the Papez circuit — thalamus relays brainstem arousal and
+# mammillary body input to hippocampus for memory encoding gating.
+wire("thalamic_hippocampal", "thalamus", "hippocampus", :projection, 25)
+
 # Feedback projection from thalamus back to brainstem. This carries
 # descending modulatory signals — thalamic state influences brainstem
 # arousal and autonomic regulation.

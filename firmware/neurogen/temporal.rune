@@ -176,6 +176,11 @@ wire("temporal_brainstem", "temporal", "brainstem", :projection, 25)
 # area for speech production, and semantic context to PFC for planning.
 wire("temporal_frontal", "temporal", "frontal", :association, 35)
 
+# Entorhinal→hippocampal: the perforant path. Main cortical input to
+# hippocampus. Temporal cortex (esp. entorhinal/perirhinal) sends sensory
+# representations to dentate gyrus and CA1 for episodic encoding.
+wire("temporal_hippocampal", "temporal", "hippocampus", :projection, 40)
+
 # ---------------------------------------------------------------------------
 # Budget verification
 # ---------------------------------------------------------------------------
