@@ -149,5 +149,6 @@ pub use runes::{
     RegionSpec, GradientSpec, DiscSpec, DiscTarget,
     TractSpec, TractType, PhaseDurations,
     execute as neurogen_execute, hash_string as neurogen_hash,
+    incubate_region as neurogen_incubate_region,
     HarnessConfig, IncubatedRegion, NeurogenResult,
 };

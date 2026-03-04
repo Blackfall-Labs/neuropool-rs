@@ -33,4 +33,4 @@ pub use builder::{
 pub use trophic::TrophicModule;
 pub use develop::DevelopModule;
 pub use budget::BudgetModule;
-pub use harness::{execute, hash_string, HarnessConfig, IncubatedRegion, NeurogenResult};
+pub use harness::{execute, hash_string, incubate_region, HarnessConfig, IncubatedRegion, NeurogenResult};

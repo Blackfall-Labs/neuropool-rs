@@ -1,0 +1,22 @@
+rune "respiratory" do
+  version 1
+  namespace :morphogen
+end
+
+# Respiratory morphogen — lung organ development.
+#
+# Declares a respiratory organ with CPG-driven 4-phase breathing
+# (inspiration, post-inspiration, expiration, post-expiration).
+# The lungs provide O2 for metabolism — each breath signals the
+# autonomic bridge which nudges brainstem glutamate (excitability).
+#
+# The respiratory system couples to the heart via RSA: breathing
+# rhythm modulates heart rate variability. This is the respiratory
+# sinus arrhythmia that makes cardiac rhythm non-mechanical.
+#
+# Parameters:
+#   - Respiratory rate: 16 breaths/min (resting adult)
+
+use :organ
+
+create_lungs(16)

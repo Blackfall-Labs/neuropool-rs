@@ -1,0 +1,26 @@
+rune "autonomic" do
+  version 1
+  namespace :morphogen
+end
+
+# Autonomic innervation — wiring organs to brainstem.
+#
+# Defines the autonomic nervous system bridge between brain and organs.
+# The brainstem's chemical state (NE, ACh, cortisol) modulates organ
+# function. Organ events (beats, breaths) feed back into brainstem
+# chemicals. This closes the metabolic loop:
+#
+#   brain activity → autonomic output → organ response
+#   → vital signs → interoceptive input → brain
+#
+# Gains control how strongly brainstem chemicals affect organs:
+#   - NE (norepinephrine): sympathetic drive (64 = 25% transfer)
+#   - ACh (acetylcholine): parasympathetic drive (64 = 25% transfer)
+#   - Cortisol: slow-acting stress response (32 = 12.5% transfer)
+
+use :innervation
+
+autonomic_bind("brainstem")
+set_gain(:ne, 64)
+set_gain(:ach, 64)
+set_gain(:cortisol, 32)

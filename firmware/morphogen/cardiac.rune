@@ -1,0 +1,22 @@
+rune "cardiac" do
+  version 1
+  namespace :morphogen
+end
+
+# Cardiac morphogen — heart organ development.
+#
+# Declares a cardiac organ with SA node pacemaker, HRV modulation,
+# and respiratory sinus arrhythmia (RSA) coupling. The heart provides
+# the metabolic rhythm — each beat signals the autonomic bridge which
+# nudges brainstem serotonin (rhythmic stability signal).
+#
+# Parameters:
+#   - HR baseline: 72 BPM (resting adult)
+#   - HRV enabled: true (variability from autonomic modulation)
+#   - RSA enabled: true (heart rate varies with breathing cycle)
+
+use :organ
+
+create_heart(72)
+enable_hrv(true)
+enable_rsa(true)

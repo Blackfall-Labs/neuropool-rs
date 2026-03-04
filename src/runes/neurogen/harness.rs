@@ -84,7 +84,10 @@ pub fn execute(builder: &NeurogenBuilder, config: &HarnessConfig) -> NeurogenRes
 }
 
 /// Incubate a single region: disc → settle → specialize.
-fn incubate_region(
+///
+/// Public so that downstream crates (e.g. astromind) can re-incubate
+/// individual regions with different seeds for bilateral mirroring.
+pub fn incubate_region(
     spec: &RegionSpec,
     seed: u64,
     config: &IncubateConfig,
