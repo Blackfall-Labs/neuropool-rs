@@ -287,9 +287,11 @@ impl UnifiedNeuron {
     /// Is this neuron in refractory period?
     #[inline]
     pub fn in_refractory(&self, current_time_us: u64) -> bool {
-        // last_spike_us == 0 means never spiked — not in refractory
+        // last_spike_us == 0 means never spiked — not in refractory.
+        // Uses wrapping_sub for safety: phase-staggered oscillators may have
+        // last_spike_us values that wrap around zero.
         self.last_spike_us > 0
-            && current_time_us < self.last_spike_us + self.nuclei.refractory as u64
+            && current_time_us.wrapping_sub(self.last_spike_us) < self.nuclei.refractory as u64
     }
 
     /// Can this neuron fire right now?
@@ -381,7 +383,8 @@ impl UnifiedNeuron {
     #[inline]
     pub fn oscillator_should_fire(&self, current_time_us: u64) -> bool {
         self.nuclei.is_oscillator()
-            && current_time_us >= self.last_spike_us + self.nuclei.oscillation_period as u64
+            && current_time_us.wrapping_sub(self.last_spike_us)
+                >= self.nuclei.oscillation_period as u64
             && self.stamina > 0
     }
 

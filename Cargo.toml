@@ -15,10 +15,12 @@ runes = ["dep:runes-core"]
 [dependencies]
 ternary-signal = "0.2"
 log = "0.4"
-runes-core = { git = "https://github.com/Blackfall-Labs/runes", package = "runes-core", optional = true }
+runes-core = { path = "../runes/runes-core", package = "runes-core", optional = true }
 
 [dev-dependencies]
 env_logger = "0.11"
 image = { version = "0.25", default-features = false, features = ["png"] }
-runes-core = { git = "https://github.com/Blackfall-Labs/runes", package = "runes-core" }
-runes-parser = { git = "https://github.com/Blackfall-Labs/runes", package = "runes-parser" }
+organpool = { path = "../organpool-rs", package = "organpool" }
+runes-core = { path = "../runes/runes-core", package = "runes-core" }
+runes-parser = { path = "../runes/runes-parser", package = "runes-parser" }
+runes-eval = { path = "../runes/runes-eval", package = "runes-eval" }

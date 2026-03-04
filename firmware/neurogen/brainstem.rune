@@ -1,0 +1,146 @@
+rune "brainstem" do
+  version 1
+  namespace :neurogen
+end
+
+# Brainstem — the universal vertebrate boot region.
+#
+# The brainstem is the first region to mature in every vertebrate nervous
+# system. It houses respiratory and cardiac oscillators, autonomic motor
+# output, and the reticular formation relay network. It requires no
+# sensory input and no other regions to function — oscillators fire
+# autonomously from the moment incubation completes.
+#
+# This program declares:
+#   - 3 trophic gradients (respiratory, cardiac, reticular)
+#   - 5 differentiation discs (2 oscillator, 1 motor, 1 relay, 1 inhibitory)
+#   - 1 whitematter tract (projection to thalamus)
+#
+# Design notes:
+#   - 512 neurons on a 4x4x4 grid gives 3D spatial resolution for
+#     gradients to produce meaningful clustering in all axes.
+#   - Inhibitory interneuron disc provides local braking around oscillator
+#     clusters. Without this, excitatory cascades run away into seizure-
+#     like synchronized storms.
+#   - The archetype seeds 40% oscillators by default. Disc specializations
+#     convert some of those to motor/relay/inhibitory, reshaping the mix.
+#     Discs that target :oscillator reinforce the archetype's oscillators
+#     with specific period ranges rather than adding new ones.
+#
+# Success criteria: after incubation, oscillators self-sustain without
+# external stimulus. Activity is sustained (>50% of frames have spikes)
+# but bounded (no single frame exceeds neuron count). Motor neurons
+# receive cascade output. Relay neurons bridge toward thalamic projections.
+
+use :budget
+use :trophic
+use :develop
+
+# ---------------------------------------------------------------------------
+# Metabolic budget
+# ---------------------------------------------------------------------------
+# 512 neurons at 10 units each = 5120 minimum. Budget headroom for
+# synaptic wiring and structural overhead.
+allocate(100000)
+
+# ---------------------------------------------------------------------------
+# Brainstem region
+# ---------------------------------------------------------------------------
+region("brainstem") do
+  archetype(:brainstem)
+  neuron_count(512)
+
+  # Developmental phases (frames):
+  #   genesis 500        — self-organization, no disc pressure
+  #   exposure 2000      — sensors feeding, discs accumulate pressure
+  #   differentiation 1000 — neurons transform irreversibly
+  #   crystallization 1000 — structure freezes, plasticity drops
+  phases(500, 2000, 1000, 1000)
+
+  # --- Trophic gradients ---
+  # These define spatial attraction points. Differentiation discs reference
+  # them via `near` to control where neuron types concentrate.
+
+  # Respiratory center: strong gradient, moderate radius
+  secrete("respiratory_center", 180, 30)
+
+  # Cardiac center: slightly weaker, tighter cluster
+  secrete("cardiac_center", 160, 25)
+
+  # Reticular formation core: wide diffuse gradient
+  secrete("reticular_core", 140, 40)
+
+  # --- Differentiation discs ---
+  # Each disc claims a percentage of the region's neurons and transforms
+  # them to the target type near the specified gradient.
+
+  # Respiratory oscillators: 0.5-2.0 Hz range (500ms-2s periods)
+  # In humans this drives ~0.2-0.5 Hz breathing rhythm.
+  # We use a wider range so the emergent frequency depends on network
+  # dynamics, not just the period preset.
+  differentiate("respiratory_oscillator") do
+    near("respiratory_center")
+    target(:oscillator)
+    threshold(25)
+    population_cap(12)
+    period_range(500000, 2000000)
+  end
+
+  # Cardiac oscillators: 0.8-1.2 Hz range (800ms-1.2s periods)
+  # Tighter frequency band than respiratory — cardiac rhythm is more
+  # constrained. SA node equivalent.
+  differentiate("cardiac_oscillator") do
+    near("cardiac_center")
+    target(:oscillator)
+    threshold(25)
+    population_cap(8)
+    period_range(800000, 1200000)
+  end
+
+  # Autonomic motor output: relay commands to peripheral organs.
+  # These receive cascade input from oscillators and relay neurons,
+  # producing the motor signals that drive organ behavior.
+  differentiate("autonomic_output") do
+    near("cardiac_center")
+    target(:motor)
+    threshold(30)
+    population_cap(8)
+  end
+
+  # Reticular relay network: the brainstem's internal routing.
+  # Spreads across the reticular formation, connects oscillator
+  # clusters to motor output and to ascending thalamic projections.
+  differentiate("reticular_relay") do
+    near("reticular_core")
+    target(:relay)
+    threshold(35)
+    population_cap(10)
+  end
+
+  # Inhibitory interneurons: local braking circuits.
+  # Distributed evenly across the region. These provide the E/I balance
+  # that prevents synchronized excitatory storms. The brainstem archetype
+  # only seeds 10% interneurons — this disc adds more inhibitory neurons
+  # throughout the region to bring effective inhibition closer to 15-20%.
+  differentiate("local_inhibition") do
+    target(:interneuron)
+    threshold(20)
+    population_cap(10)
+    spread(:even)
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Whitematter tracts
+# ---------------------------------------------------------------------------
+# Projection tract from brainstem to thalamus. This is the ascending
+# pathway that carries brainstem rhythm and arousal signals to the
+# thalamic relay, which then distributes to cortex.
+wire("brainstem_thalamic", "brainstem", "thalamus", :projection, 50)
+
+# ---------------------------------------------------------------------------
+# Budget verification
+# ---------------------------------------------------------------------------
+# Returns remaining budget. At evaluation time nothing is spent — spending
+# happens during incubation. This confirms the program evaluated cleanly.
+balance()

@@ -236,7 +236,9 @@ dependencies = [
  "env_logger",
  "image",
  "log",
+ "organpool",
  "runes-core",
+ "runes-eval",
  "runes-parser",
  "ternary-signal",
 ]
@@ -255,6 +257,14 @@ name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
+
+[[package]]
+name = "organpool"
+version = "0.2.0"
+dependencies = [
+ "log",
+ "serde",
+]
 
 [[package]]
 name = "png"
@@ -343,12 +353,18 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 [[package]]
 name = "runes-core"
 version = "0.1.0"
-source = "git+https://github.com/Blackfall-Labs/runes#3e815c0344f92467f2d1ac8fd5d78c3faeeac261"
+
+[[package]]
+name = "runes-eval"
+version = "0.1.0"
+dependencies = [
+ "runes-core",
+ "runes-parser",
+]
 
 [[package]]
 name = "runes-parser"
 version = "0.1.0"
-source = "git+https://github.com/Blackfall-Labs/runes#3e815c0344f92467f2d1ac8fd5d78c3faeeac261"
 dependencies = [
  "runes-core",
 ]

@@ -127,11 +127,25 @@ pub fn incubate(
         },
     );
 
+    // Developmental plasticity: during settling, activity-dependent
+    // refinement strengthens causal synapses (pre→post within timing
+    // window) and weakens ineffective ones. This is how the brainstem
+    // self-refines from its own oscillatory activity — the pathways
+    // that actually propagate spikes get reinforced, while dead-end
+    // connections wither. Same mechanism as biological STDP during
+    // early development, running ungated (no neuromodulator gating).
+    let plasticity_config = super::plasticity::PlasticityConfig::default();
+
     for step in 0..config.settling_steps {
         let time = step as u64 * config.step_duration_us;
         engine.sim_time_us = time;
         engine.check_oscillators();
+        engine.check_spontaneous();
         engine.run_until(time + config.step_duration_us);
+
+        // Plasticity sweep after each settling step
+        engine.plasticity_sweep(&plasticity_config);
+
         engine.decay_traces();
         engine.recover_stamina(config.step_duration_us);
     }
@@ -180,7 +194,21 @@ fn seed_neurons(disc: &ImaginalDisc, count: u32, rng: &mut Rng) -> Vec<UnifiedNe
 
         // Assign nuclei based on distribution
         let roll = rng.next_range(100) as u8;
-        let neuron = assign_nuclei(pos, roll, dist, osc_range, rng);
+        let mut neuron = assign_nuclei(pos, roll, dist, osc_range, rng);
+
+        // Phase stagger: oscillators start at a random point in their cycle.
+        // Without this, all oscillators fire at t=period (synchronized burst).
+        // Setting last_spike_us to a negative offset distributes their first
+        // firing time across [0, period), preventing pathological synchrony.
+        if neuron.nuclei.is_oscillator() && neuron.nuclei.oscillation_period > 0 {
+            let phase_offset = rng.next_range(neuron.nuclei.oscillation_period);
+            // last_spike_us represents "when was the last spike" — setting it to
+            // a value in the past means the neuron thinks it already fired
+            // phase_offset μs ago, so it will next fire at (period - phase_offset).
+            // We use wrapping_sub so the math works when sim starts at t=0.
+            neuron.last_spike_us = 0u64.wrapping_sub(phase_offset as u64);
+        }
+
         neurons.push(neuron);
     }
 

@@ -21,7 +21,7 @@ use crate::spatial::{Axon, Dendrite, EnergyGates, Interface, Nuclei};
 /// Magic bytes for unified pool files.
 const MAGIC: &[u8; 4] = b"UNPL";
 /// Format version.
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 
 /// A complete unified pool ready for save/load.
 pub struct UnifiedPool {
@@ -359,6 +359,8 @@ fn write_synapse(w: &mut Vec<u8>, s: &UnifiedSynapse) {
     write_u32(w, s.delay_us);
     write_u8(w, s.maturity);
     write_i16(w, s.pressure);
+    write_u8(w, s.health);
+    write_u64(w, s.last_conducted_us);
 }
 
 fn read_synapse(r: &mut &[u8]) -> io::Result<UnifiedSynapse> {
@@ -370,6 +372,8 @@ fn read_synapse(r: &mut &[u8]) -> io::Result<UnifiedSynapse> {
     let delay_us = read_u32(r)?;
     let maturity = read_u8(r)?;
     let pressure = read_i16(r)?;
+    let health = read_u8(r)?;
+    let last_conducted_us = read_u64(r)?;
 
     let zone = match zone_idx {
         0 => DendriticZone::Feedforward,
@@ -391,6 +395,8 @@ fn read_synapse(r: &mut &[u8]) -> io::Result<UnifiedSynapse> {
         delay_us,
         maturity,
         pressure,
+        health,
+        last_conducted_us,
     })
 }
 

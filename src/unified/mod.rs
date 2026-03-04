@@ -27,6 +27,9 @@ mod incubate;
 mod io;
 mod neuron;
 mod persist;
+mod plasticity;
+#[allow(deprecated)]
+pub mod pruning;
 mod synapse;
 mod wiring;
 mod zone;
@@ -41,6 +44,8 @@ pub use neuron::{
     RESTING_POTENTIAL,
 };
 pub use persist::UnifiedPool;
+pub use plasticity::{PlasticityConfig, PlasticityResult};
 pub use synapse::{UnifiedSynapse, UnifiedSynapseStore};
+pub use pruning::{DormancyTracker, PruningConfig, PruningResult};
 pub use wiring::{wire_by_proximity, UnifiedWiringConfig, ZoneStrategy};
 pub use zone::{DendriticZone, ZoneWeights};

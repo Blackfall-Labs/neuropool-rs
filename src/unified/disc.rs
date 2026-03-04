@@ -315,6 +315,7 @@ impl ImaginalDisc {
             RegionArchetype::Cortical => 5,
             RegionArchetype::Hippocampal => 4,  // DG, CA3, CA1, EC
             RegionArchetype::BasalGanglia => 3, // striatum, GPe/STN, GPi
+            RegionArchetype::Brainstem => 4,    // 3D nuclear structure
             _ => 1,
         };
 
@@ -338,6 +339,7 @@ impl ImaginalDisc {
             RegionArchetype::Cortical => 5u16,
             RegionArchetype::Hippocampal => 4,
             RegionArchetype::BasalGanglia => 3,
+            RegionArchetype::Brainstem => 4, // 3D nuclear structure
             _ => 1,
         };
 

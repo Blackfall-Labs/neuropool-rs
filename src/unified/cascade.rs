@@ -183,6 +183,19 @@ impl CascadeEngine {
         self.sim_time_us
     }
 
+    /// Advance simulation clock to the given time without processing events.
+    ///
+    /// This is required before calling [`check_oscillators()`] in frame-based
+    /// loops where no pending events exist yet (e.g., cold-boot with only
+    /// oscillator neurons). Without this, `sim_time_us` stays at 0 and
+    /// oscillators never see enough elapsed time to fire.
+    #[inline]
+    pub fn advance_to(&mut self, time_us: u64) {
+        if time_us > self.sim_time_us {
+            self.sim_time_us = time_us;
+        }
+    }
+
     /// Number of pending events.
     #[inline]
     pub fn pending_count(&self) -> usize {
@@ -486,6 +499,13 @@ impl CascadeEngine {
             }));
         }
 
+        // Mark conducted synapses (mutable pass on actual store)
+        for syn in self.synapses.outgoing_mut(idx as u32) {
+            if syn.is_active() {
+                syn.conduct(self.sim_time_us);
+            }
+        }
+
         // Burst fire: send lateral context spikes to neighbors
         if !was_predicted {
             self.emit_burst_laterals(idx, &synapses);
@@ -683,6 +703,55 @@ impl CascadeEngine {
         for n in &mut self.neurons {
             n.stamina = n.stamina.saturating_add(recovery);
         }
+    }
+
+    /// Run one plasticity sweep across all synapses.
+    ///
+    /// Examines spike timing between source and target neurons for each synapse.
+    /// Causal synapses (pre→post within timing window) are strengthened.
+    /// Ineffective synapses (pre fired, post didn't follow) are weakened.
+    ///
+    /// Call this after `run_until()` during settling or at end of frame.
+    pub fn plasticity_sweep(
+        &mut self,
+        config: &super::plasticity::PlasticityConfig,
+    ) -> super::plasticity::PlasticityResult {
+        super::plasticity::plasticity_sweep(
+            &self.neurons,
+            &mut self.synapses,
+            self.sim_time_us,
+            config,
+        )
+    }
+
+    /// Run one pruning cycle on the network.
+    ///
+    /// Decays synapse health, identifies prunable synapses, decays axon health,
+    /// and retracts dead axons. Does NOT remove synapses — call `hard_prune`
+    /// for that. Pruning is opt-in: callers decide when to run it.
+    pub fn pruning_cycle(
+        &mut self,
+        dormancy: &mut super::pruning::DormancyTracker,
+        config: &super::pruning::PruningConfig,
+    ) -> super::pruning::PruningResult {
+        super::pruning::pruning_cycle(
+            &mut self.neurons,
+            &mut self.synapses,
+            dormancy,
+            self.sim_time_us,
+            config,
+        )
+    }
+
+    /// Hard prune: remove dead synapses and rebuild CSR index.
+    ///
+    /// Returns the number of synapses removed.
+    pub fn hard_prune(
+        &mut self,
+        dormancy: &mut super::pruning::DormancyTracker,
+    ) -> usize {
+        let neuron_count = self.neurons.len();
+        super::pruning::hard_prune(&mut self.synapses, dormancy, neuron_count)
     }
 
     /// Clear the event queue.

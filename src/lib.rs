@@ -132,14 +132,21 @@ pub use spatial::{
 // and unified::wire_by_proximity are accessed via `unified::` prefix to avoid
 // name conflicts with the spatial system's wire_by_proximity and WiringConfig.
 pub use unified::{
-    CascadeEngine, DendriticZone, GridDims, ImaginalDisc, IncubateConfig, IncubatedPool,
-    NucleiDistribution, NullUnifiedIO, RegionArchetype, TernsigTrigger, UnifiedNeuron,
-    UnifiedNeuronIO, UnifiedPool, UnifiedSynapse, UnifiedSynapseStore, VoxelGrid,
-    VoxelNeighborhood, VoxelPosition, WiringRules, ZoneBias, ZoneWeights,
+    CascadeEngine, DendriticZone, DormancyTracker, GridDims, ImaginalDisc, IncubateConfig,
+    IncubatedPool, NucleiDistribution, NullUnifiedIO, PlasticityConfig, PlasticityResult,
+    PruningConfig, PruningResult, RegionArchetype, TernsigTrigger, UnifiedNeuron, UnifiedNeuronIO,
+    UnifiedPool, UnifiedSynapse, UnifiedSynapseStore, VoxelGrid, VoxelNeighborhood, VoxelPosition,
+    WiringRules, ZoneBias, ZoneWeights,
 };
 
 // === Runes Modules (feature-gated) ===
 #[cfg(feature = "runes")]
 pub mod runes;
 #[cfg(feature = "runes")]
-pub use runes::{SignalModule, LearningModule, CascadeModule};
+pub use runes::{
+    SignalModule, LearningModule, CascadeModule,
+    NeurogenBuilder, TrophicModule, DevelopModule, BudgetModule,
+    RegionSpec, GradientSpec, DiscSpec, DiscTarget,
+    TractSpec, TractType, PhaseDurations,
+    execute as neurogen_execute, HarnessConfig, IncubatedRegion, NeurogenResult,
+};

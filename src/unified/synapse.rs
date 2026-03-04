@@ -27,6 +27,10 @@ pub struct UnifiedSynapse {
     pub maturity: u8,
     /// Accumulated learning pressure (for weaken-before-flip mastery learning).
     pub pressure: i16,
+    /// Structural health (0=dead, 255=healthy). Decays without conduction activity.
+    pub health: u8,
+    /// Last time a spike conducted through this synapse (μs). 0=never.
+    pub last_conducted_us: u64,
 }
 
 impl UnifiedSynapse {
@@ -47,6 +51,8 @@ impl UnifiedSynapse {
             delay_us,
             maturity: 0,
             pressure: 0,
+            health: 200,
+            last_conducted_us: 0,
         }
     }
 
@@ -67,6 +73,8 @@ impl UnifiedSynapse {
             delay_us,
             maturity: 0,
             pressure: 0,
+            health: 200,
+            last_conducted_us: 0,
         }
     }
 
@@ -81,6 +89,8 @@ impl UnifiedSynapse {
             delay_us,
             maturity: 0,
             pressure: 0,
+            health: 0,
+            last_conducted_us: 0,
         }
     }
 
@@ -101,19 +111,52 @@ impl UnifiedSynapse {
             delay_us,
             maturity: 0,
             pressure: 0,
+            health: 200,
+            last_conducted_us: 0,
         }
     }
 
-    /// Is this synapse active (non-zero polarity and magnitude)?
+    /// Is this synapse active (non-zero signal and structurally healthy)?
     #[inline]
     pub fn is_active(&self) -> bool {
-        self.signal.is_active()
+        self.signal.is_active() && self.health > 0
     }
 
-    /// Is this synapse dormant?
+    /// Is this synapse dormant (zero signal or zero health)?
     #[inline]
     pub fn is_dormant(&self) -> bool {
-        !self.signal.is_active()
+        !self.signal.is_active() || self.health == 0
+    }
+
+    /// Is this synapse structurally healthy (health > 0)?
+    #[inline]
+    pub fn is_healthy(&self) -> bool {
+        self.health > 0
+    }
+
+    /// Decay structural health by `amount` (saturating). If health reaches 0, zero out signal.
+    #[inline]
+    pub fn decay_health(&mut self, amount: u8) {
+        self.health = self.health.saturating_sub(amount);
+        if self.health == 0 {
+            self.signal.polarity = 0;
+            self.signal.magnitude = 0;
+        }
+    }
+
+    /// Boost structural health by `amount` (saturating at 255).
+    #[inline]
+    pub fn boost_health(&mut self, amount: u8) {
+        self.health = self.health.saturating_add(amount);
+    }
+
+    /// Record a spike conduction through this synapse.
+    ///
+    /// Sets `last_conducted_us` and boosts health by a small fixed amount (2).
+    #[inline]
+    pub fn conduct(&mut self, time_us: u64) {
+        self.last_conducted_us = time_us;
+        self.boost_health(2);
     }
 
     /// Is this synapse excitatory?
