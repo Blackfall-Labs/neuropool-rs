@@ -120,10 +120,13 @@ pub use template::{
 // === Spatial Re-exports (deprecated) ===
 #[allow(deprecated)]
 pub use spatial::{
-    wire_by_proximity, Axon, Dendrite, EnergyGates, Interface, InterfaceAction, MasteryConfig,
-    MasteryState, Nuclei, Polarity, PolarityChange, Signal, Soma, SpatialNeuron, SpatialRuntime,
+    wire_by_proximity, Axon, Dendrite, EnergyGates, Interface, InterfaceAction,
+    Nuclei, Polarity, PolarityChange, Signal, Soma, SpatialNeuron, SpatialRuntime,
     SpatialRuntimeConfig, SpatialSynapse, WiringConfig,
 };
+// Note: spatial::MasteryConfig and spatial::MasteryState are deprecated.
+// Access them via `neuropool::spatial::MasteryConfig` if needed.
+// The unified versions are at `neuropool::unified::MasteryConfig`.
 
 // === Unified Re-exports (current) ===
 // Note: CascadeConfig, SpikeArrival exist in both voxel cascade and unified cascade.
@@ -133,10 +136,11 @@ pub use spatial::{
 // name conflicts with the spatial system's wire_by_proximity and WiringConfig.
 pub use unified::{
     CascadeEngine, DendriticZone, DormancyTracker, GridDims, ImaginalDisc, IncubateConfig,
-    IncubatedPool, NucleiDistribution, NullUnifiedIO, PlasticityConfig, PlasticityResult,
-    PruningConfig, PruningResult, RegionArchetype, TernsigTrigger, UnifiedNeuron, UnifiedNeuronIO,
-    UnifiedPool, UnifiedSynapse, UnifiedSynapseStore, VoxelGrid, VoxelNeighborhood, VoxelPosition,
-    WiringRules, ZoneBias, ZoneWeights,
+    IncubatedPool, MasteryConfig, MasteryResult, MasteryState, NucleiDistribution, NullUnifiedIO,
+    PlasticityConfig, PlasticityResult, PruningConfig, PruningResult, RegionArchetype,
+    SynaptogenesisConfig, TernsigTrigger, UnifiedNeuron, UnifiedNeuronIO, UnifiedPool,
+    UnifiedSynapse, UnifiedSynapseStore, VoxelGrid, VoxelNeighborhood, VoxelPosition, WiringRules,
+    ZoneBias, ZoneWeights,
 };
 
 // === Runes Modules (feature-gated) ===

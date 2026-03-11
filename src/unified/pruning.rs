@@ -132,8 +132,8 @@ pub fn decay_synapse_health(
 ) -> usize {
     let mut decayed = 0;
     for syn in synapses.iter_mut() {
-        if syn.health == 0 {
-            continue; // already dead
+        if syn.health == 0 || syn.maturity == 255 {
+            continue; // already dead or frozen
         }
         let inactive_duration = current_time_us.saturating_sub(syn.last_conducted_us);
         if inactive_duration > config.inactivity_window_us {
@@ -155,6 +155,10 @@ pub fn identify_prunable_synapses(
     let mut to_prune = Vec::new();
 
     for (idx, syn) in synapses.iter().enumerate() {
+        // Frozen synapses are never prunable
+        if syn.maturity == 255 {
+            continue;
+        }
         if syn.signal.magnitude < config.activity_threshold || syn.health == 0 {
             dormancy.increment(idx);
             if dormancy.get(idx) >= config.dormancy_threshold {

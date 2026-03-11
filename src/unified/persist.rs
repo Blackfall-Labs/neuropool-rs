@@ -74,9 +74,47 @@ impl UnifiedPool {
         std::fs::write(path, &file_data)
     }
 
-    /// Load pool state from a binary file.
-    pub fn load(path: &Path) -> io::Result<Self> {
-        let file_data = std::fs::read(path)?;
+    /// Save pool state to an in-memory byte buffer (UNPL binary format).
+    pub fn save_to_bytes(&self) -> Vec<u8> {
+        let mut body = Vec::with_capacity(self.neurons.len() * 64);
+
+        // Disc metadata
+        write_disc(&mut body, &self.disc);
+
+        // Neuron count
+        write_u32(&mut body, self.neurons.len() as u32);
+
+        // Neurons
+        for n in &self.neurons {
+            write_neuron(&mut body, n);
+        }
+
+        // Synapse count
+        let syn_count = self.synapses.len() as u32;
+        write_u32(&mut body, syn_count);
+
+        // Synapses
+        for s in self.synapses.iter() {
+            write_synapse(&mut body, s);
+        }
+
+        // CRC32
+        let checksum = crc32(&body);
+
+        // Build complete buffer: header + body
+        let mut file_data = Vec::with_capacity(14 + body.len());
+        file_data.extend_from_slice(MAGIC);
+        file_data.extend_from_slice(&VERSION.to_le_bytes());
+        file_data.extend_from_slice(&(self.neurons.len() as u32).to_le_bytes());
+        file_data.extend_from_slice(&checksum.to_le_bytes());
+        file_data.extend_from_slice(&body);
+
+        file_data
+    }
+
+    /// Load pool state from an in-memory byte buffer (UNPL binary format).
+    pub fn load_from_bytes(file_data: &[u8]) -> io::Result<Self> {
+        let file_data = file_data;
         if file_data.len() < 14 {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "file too small"));
         }

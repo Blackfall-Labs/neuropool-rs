@@ -59,6 +59,7 @@ impl Default for VoxelPosition {
 ///
 /// Anatomy (`Dendrite`, `Axon`, `Nuclei`) reused directly from spatial system.
 /// Position uses integer voxel coordinates instead of float `Soma`.
+#[derive(Clone)]
 pub struct UnifiedNeuron {
     // === Position ===
     /// Where in the voxel grid this neuron lives.

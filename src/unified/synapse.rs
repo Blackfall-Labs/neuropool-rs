@@ -224,6 +224,7 @@ impl UnifiedSynapse {
 ///
 /// Same structure as `SpatialSynapseStore` but holds `UnifiedSynapse`.
 /// Indexed by source neuron for efficient outgoing iteration.
+#[derive(Clone)]
 pub struct UnifiedSynapseStore {
     /// All synapses, grouped by source neuron.
     synapses: Vec<UnifiedSynapse>,

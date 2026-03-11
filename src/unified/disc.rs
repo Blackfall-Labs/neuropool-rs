@@ -145,9 +145,9 @@ impl WiringRules {
     pub fn for_archetype(archetype: RegionArchetype) -> Self {
         match archetype {
             RegionArchetype::Cortical => Self {
-                max_distance_sq: 256 * 3, // ~1.7 voxels
-                max_fanout: 8,
-                max_fanin: 20,
+                max_distance_sq: 256 * 6, // ~2.5 voxels — cross-column connections
+                max_fanout: 16,
+                max_fanin: 32,
                 zone_biases: [
                     ZoneBias {
                         zone: DendriticZone::Feedforward,
@@ -156,8 +156,8 @@ impl WiringRules {
                     },
                     ZoneBias {
                         zone: DendriticZone::Context,
-                        probability: 80,
-                        magnitude: 80,
+                        probability: 140,
+                        magnitude: 100,
                     },
                     ZoneBias {
                         zone: DendriticZone::Feedback,
@@ -165,7 +165,7 @@ impl WiringRules {
                         magnitude: 60,
                     },
                 ],
-                dense_lateral: false,
+                dense_lateral: true, // recurrent loops critical for cortical ignition
                 oscillator_period_range: (8_000, 20_000), // 50-125 Hz (gamma/beta)
             },
             RegionArchetype::Thalamic => Self {

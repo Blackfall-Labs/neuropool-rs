@@ -59,6 +59,12 @@ pub struct TernsigTrigger {
     pub program_id: u32,
     /// Activation levels of the bound neurons (indexed by binding order).
     pub activation: Vec<i16>,
+    /// Feedforward zone potentials of bound neurons.
+    pub ff_zones: Vec<i16>,
+    /// Context zone potentials of bound neurons.
+    pub ctx_zones: Vec<i16>,
+    /// Feedback zone potentials of bound neurons.
+    pub fb_zones: Vec<i16>,
 }
 
 /// Configuration for the cascade engine.
@@ -598,9 +604,12 @@ impl CascadeEngine {
             .interface
             .ternsig_program_id();
 
-        // Collect bound neurons and their activation
+        // Collect bound neurons and their activation + zone potentials
         let mut bound_indices = Vec::new();
         let mut activation = Vec::new();
+        let mut ff_zones = Vec::new();
+        let mut ctx_zones = Vec::new();
+        let mut fb_zones = Vec::new();
         let mut active_count = 0u32;
 
         for (i, n) in self.neurons.iter().enumerate() {
@@ -609,6 +618,9 @@ impl CascadeEngine {
             {
                 bound_indices.push(i);
                 activation.push(n.trace as i16);
+                ff_zones.push(n.feedforward_potential);
+                ctx_zones.push(n.context_potential);
+                fb_zones.push(n.feedback_potential);
                 if n.trace > 0 {
                     active_count += 1;
                 }
@@ -624,6 +636,9 @@ impl CascadeEngine {
             self.ternsig_triggers.push(TernsigTrigger {
                 program_id,
                 activation,
+                ff_zones,
+                ctx_zones,
+                fb_zones,
             });
         }
     }
@@ -720,7 +735,7 @@ impl CascadeEngine {
         }
     }
 
-    /// Run one plasticity sweep across all synapses.
+    /// Run one plasticity sweep across all synapses (simple STDP).
     ///
     /// Examines spike timing between source and target neurons for each synapse.
     /// Causal synapses (pre→post within timing window) are strengthened.
@@ -737,6 +752,44 @@ impl CascadeEngine {
             self.sim_time_us,
             config,
         )
+    }
+
+    /// Run one mastery learning sweep across all synapses.
+    ///
+    /// Pressure-based plasticity with participation gating, metabolic budgets,
+    /// hub anti-Hebbian dynamics, and polarity flips. Supersedes simple STDP
+    /// for production use.
+    pub fn mastery_sweep(
+        &mut self,
+        state: &mut super::plasticity::MasteryState,
+        config: &super::plasticity::MasteryConfig,
+    ) -> super::plasticity::MasteryResult {
+        super::plasticity::mastery_sweep(
+            &self.neurons,
+            &mut self.synapses,
+            self.sim_time_us,
+            state,
+            config,
+        )
+    }
+
+    /// ACh-gated synaptogenesis — create new synapses between co-active neurons.
+    ///
+    /// Returns the number of new synapses created.
+    pub fn synaptogenesis(&mut self, ach_level: u8) -> usize {
+        super::plasticity::synaptogenesis(
+            &self.neurons,
+            &mut self.synapses,
+            self.sim_time_us,
+            ach_level,
+            &super::plasticity::SynaptogenesisConfig::default(),
+        )
+    }
+
+    /// Total number of synapses in the network.
+    #[inline]
+    pub fn synapse_count(&self) -> usize {
+        self.synapses.len()
     }
 
     /// Run one pruning cycle on the network.

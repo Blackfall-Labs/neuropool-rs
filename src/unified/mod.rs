@@ -44,7 +44,11 @@ pub use neuron::{
     RESTING_POTENTIAL,
 };
 pub use persist::UnifiedPool;
-pub use plasticity::{PlasticityConfig, PlasticityResult};
+pub use plasticity::{
+    PlasticityConfig, PlasticityResult,
+    MasteryConfig, MasteryState, MasteryResult,
+    SynaptogenesisConfig,
+};
 pub use synapse::{UnifiedSynapse, UnifiedSynapseStore};
 pub use pruning::{DormancyTracker, PruningConfig, PruningResult};
 pub use wiring::{wire_by_proximity, UnifiedWiringConfig, ZoneStrategy};
